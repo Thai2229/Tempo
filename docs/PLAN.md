@@ -9,15 +9,21 @@ Status as of 2026-11-09. Each milestone = one session = one PR.
 - [x] C4: training, checkpoints, EER evaluation
 - [x] C5: enrollment & verification engine (template store, adaptation, lockout, replay check)
 
-Current model (checkpoints/model.json, CMU, 10 enrollment attempts): val EER 17.5%, test EER 28.5%,
-early-stopped at epoch 2 of 12. Val and test disagree by 11 points, and val EER gets worse after epoch 2.
+Current model (checkpoints/model.json, CMU, 10 enrollment attempts, split seed 0): val EER 13.56%, test EER 21.84%,
+supervised contrastive loss, 30 epochs, no early stopping. Over 5 split seeds: val 18.76 +/- 4.47%, test 21.50 +/- 9.30%,
+level with scaled Manhattan (22.14 +/- 5.98%). Details and caveats in docs/RESULTS.md.
 
 ## C6: Model quality (owner: ai-lead)
-- [ ] scripts/get_cmu.py: download DSL-StrongPasswordData.csv into data/ (source: CMU Keystroke Dynamics Benchmark page); fail clearly if unreachable
-- [ ] Classic baselines on the same splits and enrollment count: scaled Manhattan and Mahalanobis distance on raw timing vectors
-- [ ] Results table in docs/RESULTS.md: baseline vs encoder, val and test EER, mean and std over 3+ seeds / split seeds
-- [ ] Investigate the val/test gap (split size, seed variance, early stopping on a noisy metric) and fix what's real
-- [ ] Ship whichever model wins on test EER; engine keeps working with either via the Embedder protocol
+- [x] scripts/get_cmu.py: download DSL-StrongPasswordData.csv into data/ (source: CMU Keystroke Dynamics Benchmark page); fail clearly if unreachable
+- [x] Classic baselines on the same splits and enrollment count: scaled Manhattan and Mahalanobis distance on raw timing vectors
+- [x] Results table in docs/RESULTS.md: baseline vs encoder, val and test EER, mean and std over 3+ seeds / split seeds
+- [x] Investigate the val/test gap (split size, seed variance, early stopping on a noisy metric) and fix what's real
+- [x] Ship whichever model wins on test EER; engine keeps working with either via the Embedder protocol
+  - Encoder shipped and runs through the Embedder protocol. The classic detectors tied it on test EER but need per-user statistics at scoring time, so they are not wired into the engine (docs/RESULTS.md; follow-up in C6b).
+
+## C6b: Per-user verification (owner: ai-lead, backend-developer for engine wiring)
+- [ ] Per-user thresholds set at enrollment, to cut the false-reject rate (37.79% test FRR on split seed 0 at the global val threshold)
+- [ ] Optional support for the classic detectors in the engine (per-user statistics at scoring time)
 
 ## C7: HTTP API (owner: backend-developer)
 - [ ] FastAPI app in src/keyauth/api: POST /enroll, POST /verify, GET /status, DELETE /user, GET /health
