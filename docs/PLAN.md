@@ -18,8 +18,12 @@ level with scaled Manhattan (22.14 +/- 5.98%). Details and caveats in docs/RESUL
 - [x] Classic baselines on the same splits and enrollment count: scaled Manhattan and Mahalanobis distance on raw timing vectors
 - [x] Results table in docs/RESULTS.md: baseline vs encoder, val and test EER, mean and std over 3+ seeds / split seeds
 - [x] Investigate the val/test gap (split size, seed variance, early stopping on a noisy metric) and fix what's real
-- [ ] Ship whichever model wins on test EER; engine keeps working with either via the Embedder protocol
-  - Encoder shipped and runs through the Embedder protocol. Left open because the classic detectors need per-user statistics at scoring time, so they cannot run through the stateless protocol as it stands (docs/RESULTS.md).
+- [x] Ship whichever model wins on test EER; engine keeps working with either via the Embedder protocol
+  - Encoder shipped and runs through the Embedder protocol. The classic detectors tied it on test EER but need per-user statistics at scoring time, so they are not wired into the engine (docs/RESULTS.md; follow-up in C6b).
+
+## C6b: Per-user verification (owner: ai-lead, backend-developer for engine wiring)
+- [ ] Per-user thresholds set at enrollment, to cut the false-reject rate (37.79% test FRR on split seed 0 at the global val threshold)
+- [ ] Optional support for the classic detectors in the engine (per-user statistics at scoring time)
 
 ## C7: HTTP API (owner: backend-developer)
 - [ ] FastAPI app in src/keyauth/api: POST /enroll, POST /verify, GET /status, DELETE /user, GET /health
