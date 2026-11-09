@@ -24,3 +24,8 @@ MS_PER_SECOND = 1000.0
 # treated as a broken capture (e.g. user walked away mid-phrase).
 MAX_HOLD_S = 2.0
 MAX_LATENCY_S = 5.0
+
+# Limits on timing arrays submitted to the engine / API.
+MAX_KEYS = 128
+# dd must equal hold + ud for each keystroke; allow this much rounding error (seconds).
+DD_TOLERANCE_S = 0.002
