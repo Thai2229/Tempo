@@ -6,7 +6,7 @@ __pycache__/
 venv/
 
 # data, checkpoints, user templates (never commit biometric data)
-data/
-checkpoints/
+/data/
+/checkpoints/
 *.pt
 *.db
