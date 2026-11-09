@@ -59,3 +59,32 @@ def batch_hard_triplet_loss(emb: torch.Tensor, labels: torch.Tensor, margin: flo
         mean_pos=float(hardest_pos[usable].mean()),
         mean_neg=float(hardest_neg[usable].mean()),
     )
+
+
+def supervised_contrastive_loss(emb: torch.Tensor, labels: torch.Tensor, temperature: float = 0.1) -> TripletStats:
+    """Supervised contrastive loss (Khosla et al., 2020) on unit embeddings.
+
+    Each anchor must rank all of its positives above every other attempt in
+    the batch. Unlike a hinge on distances, this cannot be satisfied by
+    mapping everyone to one point: its value there is log(batch size - 1).
+    """
+    if emb.shape[0] != labels.shape[0] or temperature <= 0.0:
+        raise ValueError(f"need matching emb and labels lengths and temperature > 0, got temperature {temperature}")
+    same = labels[:, None] == labels[None, :]
+    eye = torch.eye(len(labels), dtype=torch.bool, device=emb.device)
+    pos_mask = same & ~eye
+    usable = pos_mask.any(dim=1) & (~same).any(dim=1)
+    if not usable.any():
+        raise ValueError("batch needs >=2 users with >=2 attempts each")
+
+    logits = (emb @ emb.T / temperature).masked_fill(eye, float("-inf"))
+    log_prob = logits - torch.logsumexp(logits, dim=1, keepdim=True)
+    per_anchor = -(log_prob.masked_fill(~pos_mask, 0.0)).sum(dim=1) / pos_mask.sum(dim=1).clamp_min(1)
+
+    dist = pairwise_distances(emb.detach())
+    return TripletStats(
+        loss=per_anchor[usable].mean(),
+        active_frac=1.0,
+        mean_pos=float((dist * pos_mask.to(dist.dtype)).max(dim=1).values[usable].mean()),
+        mean_neg=float(dist.masked_fill(same, float("inf")).min(dim=1).values[usable].mean()),
+    )

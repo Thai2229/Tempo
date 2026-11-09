@@ -1,7 +1,12 @@
 """Embedding model and metric-learning loss (requires PyTorch)."""
 
 from keyauth.model.encoder import EncoderConfig, RhythmEncoder
-from keyauth.model.losses import TripletStats, batch_hard_triplet_loss, pairwise_distances
+from keyauth.model.losses import (
+    TripletStats,
+    batch_hard_triplet_loss,
+    pairwise_distances,
+    supervised_contrastive_loss,
+)
 
 __all__ = [
     "EncoderConfig",
@@ -9,4 +14,5 @@ __all__ = [
     "TripletStats",
     "batch_hard_triplet_loss",
     "pairwise_distances",
+    "supervised_contrastive_loss",
 ]

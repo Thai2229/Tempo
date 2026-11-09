@@ -4,10 +4,11 @@
     python -m keyauth.train --data synthetic          # no dataset needed
 
 Users are split train / val / test (no overlap). The model trains on train
-users; after each epoch, validation users are enrolled and verified to get a
-val EER, and the best epoch is kept. The accept threshold is chosen on val
-users, then FAR / FRR / EER are reported on test users, who influenced
-neither the weights nor the threshold.
+users for a fixed number of epochs; after each epoch, validation users are
+enrolled and verified to log a val EER (TrainConfig.patience turns that into
+early stopping). The accept threshold is chosen on val users, then FAR / FRR /
+EER are reported on test users, who influenced neither the weights nor the
+threshold.
 
 The checkpoint holds everything the API needs: weights, encoder config,
 normalizer and threshold.
@@ -29,19 +30,30 @@ import torch
 from keyauth.data import KeystrokeData, Normalizer, load_cmu, make_synthetic_dataset, split_users
 from keyauth.data.torch_dataset import KeystrokeDataset, PKBatchSampler
 from keyauth.evaluate import summarize, verification_scores
-from keyauth.model import EncoderConfig, RhythmEncoder, batch_hard_triplet_loss
+from keyauth.model import (
+    EncoderConfig,
+    RhythmEncoder,
+    TripletStats,
+    batch_hard_triplet_loss,
+    supervised_contrastive_loss,
+)
 
 
 @dataclass
 class TrainConfig:
-    epochs: int = 40
+    epochs: int = 30
     batches_per_epoch: int = 100
     p: int = 8  # users per batch
     k: int = 8  # attempts per user per batch
     lr: float = 1e-3
     weight_decay: float = 1e-4
     margin: float = 0.2
-    patience: int = 10  # stop after this many epochs without val improvement
+    loss: str = "supcon"  # "supcon" | "batch_hard"
+    temperature: float = 0.1  # supcon only
+    # None = train all epochs and keep the last. An int stops after that many
+    # epochs without val improvement and keeps the best-val epoch, which on 8
+    # val users mostly selects noise (see docs/RESULTS.md).
+    patience: int | None = None
     n_enroll: int = 10  # enrollment attempts per user during evaluation
     impostors_per_user: int = 5
     seed: int = 0
@@ -72,13 +84,23 @@ def evaluate_split(model, normalizer, data: KeystrokeData, cfg: TrainConfig, thr
     return summarize(scores, threshold)
 
 
+def compute_loss(emb: torch.Tensor, labels: torch.Tensor, cfg: TrainConfig) -> TripletStats:
+    if cfg.loss not in ("batch_hard", "supcon"):
+        raise ValueError(f"unknown loss {cfg.loss!r}")
+    if cfg.loss == "supcon":
+        return supervised_contrastive_loss(emb, labels, cfg.temperature)
+    return batch_hard_triplet_loss(emb, labels, cfg.margin)
+
+
 def train(
     train_data: KeystrokeData,
     val_data: KeystrokeData,
     cfg: TrainConfig | None = None,
     enc_cfg: EncoderConfig | None = None,
     log: Callable[[str], None] = print,
+    epoch_hook: Callable[[dict, RhythmEncoder], None] | None = None,
 ) -> tuple[RhythmEncoder, Normalizer, list[dict]]:
+    """epoch_hook(row, model) may add diagnostics to a history row; it runs after the row is built."""
     if cfg is None:
         cfg = TrainConfig()
     torch.manual_seed(cfg.seed)
@@ -102,7 +124,7 @@ def train(
         losses, active = [], []
         for batch in sampler:
             x = ds.x[batch].to(cfg.device)
-            stats = batch_hard_triplet_loss(model(x, ds.lengths[batch]), ds.labels[batch].to(cfg.device), cfg.margin)
+            stats = compute_loss(model(x, ds.lengths[batch]), ds.labels[batch].to(cfg.device), cfg)
             opt.zero_grad()
             stats.loss.backward()
             opt.step()
@@ -113,6 +135,8 @@ def train(
         val = evaluate_split(model, normalizer, val_data, cfg)
         row = {"epoch": epoch, "loss": float(np.mean(losses)), "active": float(np.mean(active)), **val}
         history.append(row)
+        if epoch_hook is not None:
+            epoch_hook(row, model)
         log(
             f"epoch {epoch:3d}  loss {row['loss']:.4f}  active {row['active']:.2f}  "
             f"val EER {val['eer'] * 100:5.2f}%  per-user EER {val['per_user_eer'] * 100:5.2f}%  "
@@ -125,11 +149,12 @@ def train(
             stale = 0
         else:
             stale += 1
-        if stale >= cfg.patience:
+        if cfg.patience is not None and stale >= cfg.patience:
             log(f"no val improvement for {cfg.patience} epochs, stopping")
             break
 
-    model.load_state_dict(best_state)
+    if cfg.patience is not None:
+        model.load_state_dict(best_state)
     model.eval()
     return model, normalizer, history
 

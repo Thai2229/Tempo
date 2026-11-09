@@ -21,6 +21,7 @@ optimistic because it picks a different threshold per user).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable
 
 import numpy as np
 
@@ -86,6 +87,27 @@ def verification_scores(
     and for recordings), so "first n" means "earliest n".
     """
     embeddings = np.asarray(embeddings, dtype=np.float64)
+
+    def score_user(enroll: np.ndarray, genuine: np.ndarray, impostor: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        template = make_template(enroll)
+        return np.linalg.norm(genuine - template, axis=1), np.linalg.norm(impostor - template, axis=1)
+
+    return score_protocol(embeddings, user_ids, score_user, n_enroll, impostors_per_user)
+
+
+def score_protocol(
+    features: np.ndarray,
+    user_ids: np.ndarray,
+    score_user: Callable[[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]],
+    n_enroll: int = 10,
+    impostors_per_user: int = 5,
+) -> Scores:
+    """Run the enrollment protocol from this module's docstring over any scorer.
+
+    score_user(enroll_rows, genuine_rows, impostor_rows) -> (genuine, impostor)
+    distances. Every model is compared through this one function, so they all
+    see the same enrollment attempts and the same impostors.
+    """
     user_ids = np.asarray(user_ids)
     users = sorted(set(user_ids.tolist()))
     rows = {u: np.flatnonzero(user_ids == u) for u in users}
@@ -98,10 +120,8 @@ def verification_scores(
         idx = rows[u]
         if len(idx) <= n_enroll:
             raise ValueError(f"user {u} has {len(idx)} attempts; need more than n_enroll={n_enroll}")
-        template = make_template(embeddings[idx[:n_enroll]])
-        gen = np.linalg.norm(embeddings[idx[n_enroll:]] - template, axis=1)
         imp_idx = np.concatenate([rows[v][:impostors_per_user] for v in users if v != u])
-        imp = np.linalg.norm(embeddings[imp_idx] - template, axis=1)
+        gen, imp = score_user(features[idx[:n_enroll]], features[idx[n_enroll:]], features[imp_idx])
         scores.per_user[u] = (gen, imp)
         all_gen.append(gen)
         all_imp.append(imp)

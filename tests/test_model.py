@@ -1,6 +1,9 @@
+import math
+
 import pytest
 
 torch = pytest.importorskip("torch")
+F = torch.nn.functional
 
 from keyauth.data import Normalizer, make_synthetic_dataset  # noqa: E402
 from keyauth.data.torch_dataset import KeystrokeDataset, PKBatchSampler  # noqa: E402
@@ -9,6 +12,7 @@ from keyauth.model import (  # noqa: E402
     RhythmEncoder,
     batch_hard_triplet_loss,
     pairwise_distances,
+    supervised_contrastive_loss,
 )
 
 
@@ -132,3 +136,45 @@ def test_training_reduces_loss_on_synthetic_typists():
         opt.step()
     after = full_loss()
     assert after < before
+
+
+# ---- supervised contrastive loss -----------------------------------------
+
+
+def test_supcon_at_collapse_equals_log_of_other_attempts():
+    emb = torch.zeros(8, 4)
+    emb[:, 0] = 1.0  # every attempt is the same point
+    labels = torch.tensor([0, 0, 1, 1, 2, 2, 3, 3])
+    assert supervised_contrastive_loss(emb, labels).loss.item() == pytest.approx(math.log(7), abs=1e-5)
+
+
+def test_supcon_prefers_separated_users():
+    labels = torch.tensor([0, 0, 1, 1])
+    separated = torch.tensor([[1.0, 0.0], [1.0, 0.0], [0.0, 1.0], [0.0, 1.0]])
+    mixed = torch.tensor([[1.0, 0.0], [0.0, 1.0], [1.0, 0.0], [0.0, 1.0]])
+    assert supervised_contrastive_loss(separated, labels).loss < supervised_contrastive_loss(mixed, labels).loss
+
+
+def test_supcon_gradient_pushes_a_collapsed_batch_apart():
+    emb = F.normalize(torch.eye(4)[0].repeat(8, 1) + 1e-3 * torch.randn(8, 4, generator=torch.Generator().manual_seed(0)), dim=1)
+    emb.requires_grad_(True)
+    labels = torch.tensor([0, 0, 1, 1, 2, 2, 3, 3])
+    supervised_contrastive_loss(emb, labels).loss.backward()
+    assert torch.isfinite(emb.grad).all() and emb.grad.abs().sum() > 0
+
+
+@pytest.mark.parametrize("temperature", [0.0, -1.0])
+def test_supcon_rejects_bad_temperature(temperature):
+    with pytest.raises(ValueError):
+        supervised_contrastive_loss(torch.eye(4), torch.tensor([0, 0, 1, 1]), temperature)
+
+
+def test_supcon_rejects_length_mismatch():
+    with pytest.raises(ValueError):
+        supervised_contrastive_loss(torch.eye(4), torch.tensor([0, 0, 1]))
+
+
+@pytest.mark.parametrize("labels", [[0, 1, 2, 3], [0, 0, 0, 0]])
+def test_supcon_rejects_batches_without_pairs(labels):
+    with pytest.raises(ValueError):
+        supervised_contrastive_loss(torch.eye(4), torch.tensor(labels))
