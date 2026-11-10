@@ -23,12 +23,12 @@ def parse_rate_limit(text: str) -> tuple[int, float]:
 class Settings:
     checkpoint: str = "checkpoints/model.pt"
     db_path: str = "keyauth.db"
-    per_user: bool = False  # per-user thresholds from the checkpoint's params (opt-in)
+    per_user: bool = True  # per-user thresholds from the checkpoint's params (global threshold if it has none)
     app_id: str = "default"  # single-tenant demo: every request uses this app_id
     debug_scores: bool = False  # include score / threshold in /verify responses
     rate_limit: int = 30  # max requests per window, per client IP and per user_id
     rate_window_s: float = 60.0
-    admin_token: str | None = None  # if set, DELETE /user needs "Authorization: Bearer <token>"
+    admin_token: str | None = None  # DELETE /user needs "Authorization: Bearer <token>"; unset = refused
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -39,7 +39,7 @@ class Settings:
         return cls(
             checkpoint=env.get("KEYAUTH_CHECKPOINT", "checkpoints/model.pt"),
             db_path=env.get("KEYAUTH_DB", "keyauth.db"),
-            per_user=env.get("KEYAUTH_PER_USER", "0").strip().lower() in _TRUE,
+            per_user=env.get("KEYAUTH_PER_USER", "1").strip().lower() in _TRUE,
             app_id=env.get("KEYAUTH_APP_ID", "default"),
             debug_scores=env.get("KEYAUTH_DEBUG_SCORES", "0").strip().lower() in _TRUE,
             rate_limit=limit,

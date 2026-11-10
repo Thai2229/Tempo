@@ -28,6 +28,7 @@ logger = logging.getLogger("keyauth.api")
 
 MAX_EVENTS = 4 * MAX_KEYS
 MAX_BODY_BYTES = 128 * 1024
+MIN_ADMIN_TOKEN_CHARS = 16
 USER_ID_PATTERN = r"^[A-Za-z0-9._@-]{1,64}$"
 
 UserId = Annotated[str, Field(min_length=1, max_length=64, pattern=USER_ID_PATTERN)]
@@ -89,6 +90,8 @@ def build_engine(settings: Settings) -> KeyAuthEngine:
     per_user = None
     if settings.per_user:
         per_user = TorchEmbedder.per_user_params(settings.checkpoint)
+        if per_user is None:
+            logger.warning("checkpoint has no per-user threshold params, using the global threshold")
     return KeyAuthEngine(embedder, TemplateStore(settings.db_path), threshold, EngineConfig(), per_user=per_user)
 
 
@@ -97,6 +100,8 @@ def create_app(engine: KeyAuthEngine | None = None, settings: Settings | None = 
         settings = Settings.from_env()
     state = {"engine": engine, "attempted": engine is not None}
     load_lock = threading.Lock()
+    if settings.admin_token and len(settings.admin_token) < MIN_ADMIN_TOKEN_CHARS:
+        logger.warning("KEYAUTH_ADMIN_TOKEN is shorter than %d characters, use a longer one", MIN_ADMIN_TOKEN_CHARS)
     limiter = SlidingWindowLimiter(settings.rate_limit, settings.rate_window_s)  # tests swap app.state.limiter.clock
 
     def get_engine() -> KeyAuthEngine | None:
@@ -243,10 +248,12 @@ def create_app(engine: KeyAuthEngine | None = None, settings: Settings | None = 
 
     @app.delete("/user")
     def delete_user(request: Request, user_id: Annotated[str, Query(min_length=1, max_length=64, pattern=USER_ID_PATTERN)]):
-        if settings.admin_token is not None:
-            given = request.headers.get("authorization", "")
-            if not hmac.compare_digest(given.encode(), f"Bearer {settings.admin_token}".encode()):
-                raise ApiError(401, "unauthorized", "admin token required", {"WWW-Authenticate": "Bearer"})
+        if not settings.admin_token:
+            message = "deleting users requires KEYAUTH_ADMIN_TOKEN on the server and a matching Authorization: Bearer <token> header"
+            raise ApiError(401, "unauthorized", message, {"WWW-Authenticate": "Bearer"})
+        given = request.headers.get("authorization", "")
+        if not hmac.compare_digest(given.encode(), f"Bearer {settings.admin_token}".encode()):
+            raise ApiError(401, "unauthorized", "admin token required", {"WWW-Authenticate": "Bearer"})
         deleted = require_engine().delete_user(settings.app_id, user_id)
         logger.info("endpoint=delete user=%s outcome=%s", user_tag(user_id), deleted)
         if not deleted:

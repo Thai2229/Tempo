@@ -10,7 +10,7 @@ Endpoints
   POST   /enroll         {user_id, events | timings}
   POST   /verify         {user_id, events | timings}
   GET    /status?user_id=
-  DELETE /user?user_id=   (Authorization: Bearer <KEYAUTH_ADMIN_TOKEN> if that variable is set)
+  DELETE /user?user_id=   (always needs Authorization: Bearer <KEYAUTH_ADMIN_TOKEN>)
   GET    /health
 
 Exactly one of `events` (raw keydown/keyup: [{key, type: "down"|"up", t in ms, code?}], as the
@@ -34,7 +34,7 @@ Errors always look like {"error": {"code": ..., "message": ...}}:
   422 length_mismatch      different number of keys than at enrollment (enroll and verify)
   503 model_unavailable    model/checkpoint not loaded
   503 scorer_error         stored template unusable; fails closed
-  401 unauthorized         DELETE /user without the admin token (only if one is configured)
+  401 unauthorized         DELETE /user without the matching admin token, or when KEYAUTH_ADMIN_TOKEN is unset/empty
   500 internal_error       anything unexpected (no details)
 A verify that merely does not match is a normal 200 {"accepted": false, "reason": "no_match"}.
 Replay / length_mismatch / locked on /verify are never accepted and the first two count as failures
@@ -45,8 +45,12 @@ Logs carry a short hash of user_id, the endpoint and the outcome reason only; ne
 events, embeddings or scores.
 
 Rate limits are in memory and per process: with several workers each has its own counters.
-DELETE without KEYAUTH_ADMIN_TOKEN is open (demo only): set the token anywhere else, since
-delete + re-enroll replaces a user's template.
+DELETE /user is refused for everyone (401) unless KEYAUTH_ADMIN_TOKEN is set on the server and the
+request carries the matching bearer token, since delete + re-enroll replaces a user's template.
+Tokens shorter than 16 characters are accepted but logged as a warning at startup.
+
+Thresholds: per-user thresholds are on by default (KEYAUTH_PER_USER=0 turns them off). If the
+checkpoint has no per-user params (older checkpoint) the global threshold is used and one warning is logged.
 """
 
 from keyauth.api.app import create_app
