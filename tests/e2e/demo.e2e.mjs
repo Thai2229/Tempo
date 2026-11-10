@@ -1,6 +1,7 @@
 // Real-browser check of the demo page. Not part of pytest. Run (server already started):
 //   KEYAUTH_DB=/tmp/e2e.db KEYAUTH_DEBUG_SCORES=1 KEYAUTH_PORT=8765 python -m keyauth.api &
 //   E2E_URL=http://127.0.0.1:8765 E2E_SHOT=/tmp/demo.png node tests/e2e/demo.e2e.mjs
+// E2E_VIDEO=<dir> also records a .webm of the run (used for docs/demo.gif).
 import { createRequire } from "node:module";
 import assert from "node:assert/strict";
 const { chromium } = createRequire(import.meta.url)("playwright");
@@ -26,7 +27,11 @@ async function typeKeys(page, keys, jitter = 12) {
 const phrase = () => [...PHRASE, "Enter"];
 
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: 900, height: 900 }, deviceScaleFactor: 1 });
+const ctxOptions = { viewport: { width: 900, height: 900 }, deviceScaleFactor: 1 };
+if (process.env.E2E_VIDEO) {
+  ctxOptions.recordVideo = { dir: process.env.E2E_VIDEO, size: { width: 900, height: 900 } };
+}
+const ctx = await browser.newContext(ctxOptions);
 const page = await ctx.newPage();
 const problems = [];
 page.on("console", (m) => {
@@ -98,6 +103,7 @@ for (const body of posted) {
 }
 console.log("sample event:", posted[0].slice(0, 160));
 
+await ctx.close();
 await browser.close();
 assert.deepEqual(problems, [], problems.join("\n"));
 let outcome = "rejected";
