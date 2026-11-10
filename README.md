@@ -28,9 +28,9 @@ logs in. Debug mode shows the score against the threshold.*
    - locks the account after repeated failures;
    - nudges the template toward confident accepts, because rhythm drifts over time.
 
-   Optional extras:
-   - per-user thresholds (C6b);
-   - the classic scaled-Manhattan and Mahalanobis detectors instead of the encoder.
+   Each user gets their own threshold, set from how consistently they typed during enrollment (on by default;
+   `KEYAUTH_PER_USER=0` uses one global threshold). Optionally, the classic scaled-Manhattan and Mahalanobis
+   detectors can replace the encoder.
 
 The engine never sees the password. The app checks the password itself, and keyauth answers only "does the
 rhythm match?".
@@ -57,7 +57,7 @@ Honest reading:
 - **It's a tie, not a win.** The shipped encoder ties the classic detectors, which have been around since 2009.
 - **Splits vary a lot.** With only 8 test users per split, treat any single number as ± 5 points.
 - **Per-user thresholds trade one error for another.** On split seed 0 they cut the false-reject rate from 36.8 %
-  to 31.8 % but raise false accepts from 13.9 % to 15.0 %, so they are off by default.
+  to 31.8 % but raise false accepts from 13.9 % to 15.0 %. They are on by default, to reject fewer real users.
 - **Short enrollment costs accuracy.** 10 enrollment attempts is far fewer than the 200 that Killourhy & Maxion
   (2009) used.
 
@@ -119,7 +119,7 @@ The container runs as a non-root user and keeps its SQLite database in the `keya
 | `POST /enroll` `{user_id, events \| timings}` | add one enrollment attempt; returns progress |
 | `POST /verify` `{user_id, events \| timings}` | `{accepted, reason}`; locked accounts get 423 with `Retry-After` |
 | `GET /status?user_id=` | enrollment and lock status |
-| `DELETE /user?user_id=` | delete a user's template (set `KEYAUTH_ADMIN_TOKEN` outside the demo) |
+| `DELETE /user?user_id=` | delete a user's template; always needs `Authorization: Bearer $KEYAUTH_ADMIN_TOKEN` (refused when no token is set) |
 | `GET /health` | liveness and whether the model loaded |
 
 Every error has the shape `{"error": {"code", "message"}}`. The full status-code mapping is in
@@ -158,7 +158,9 @@ docs/                      PLAN.md (roadmap), RESULTS.md (all numbers)
 - Keystroke timings are biometric data. The repo never contains user templates, databases or model files
   (`.gitignore`).
 - The demo page sends anonymized events only.
-- `DELETE /user` removes a user's template and samples.
+- `DELETE /user` removes a user's template and samples. It is an admin action: it needs `KEYAUTH_ADMIN_TOKEN`, so
+  nobody can delete a user and re-enroll as them. In the demo page, "Delete my data" therefore shows "Deleting
+  needs an admin token".
 
 ## License
 
