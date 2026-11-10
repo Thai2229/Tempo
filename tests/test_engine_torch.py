@@ -8,7 +8,8 @@ torch = pytest.importorskip("torch")
 from keyauth.auth import EngineConfig, InvalidTimings, KeyAuthEngine, TemplateStore  # noqa: E402
 from keyauth.auth.embedder import TorchEmbedder  # noqa: E402
 from keyauth.data import make_synthetic_dataset, split_users  # noqa: E402
-from keyauth.train import TrainConfig, save_checkpoint, train  # noqa: E402
+from keyauth.thresholds import PerUserThresholdParams  # noqa: E402
+from keyauth.train import TrainConfig, load_checkpoint, save_checkpoint, train  # noqa: E402
 
 MATCH_ANYTHING = 2.0  # the largest possible distance between unit vectors
 
@@ -93,6 +94,29 @@ def test_inconsistent_enrollment_restarts(checkpoint):
     engine = KeyAuthEngine(embedder, TemplateStore(), threshold=1e-9, config=EngineConfig(enroll_samples=5))
     results = [engine.enroll("app", "alice", a) for a in attempts(data, data.users[0], 5)]
     assert results[-1].status == "rejected" and results[-1].reason == "inconsistent"
+
+
+def test_per_user_params_from_checkpoint(checkpoint, tmp_path):
+    """Old checkpoints (no params) give None, new ones give the saved rule; from_checkpoint is unchanged."""
+    assert TorchEmbedder.per_user_params(checkpoint[0]) is None
+    model, normalizer, _ = load_checkpoint(checkpoint[0])
+    params = PerUserThresholdParams(scale=1.5, weight=0.5, reference_spread=0.2)
+    path = tmp_path / "with_params.pt"
+    save_checkpoint(path, model, normalizer, threshold=0.3, metrics={}, per_user_threshold=params)
+    assert TorchEmbedder.per_user_params(path) == params
+    embedder, threshold = TorchEmbedder.from_checkpoint(path)
+    assert threshold == pytest.approx(0.3) and callable(embedder)
+
+
+def test_engine_with_checkpoint_params_stores_a_user_threshold(checkpoint):
+    path, data = checkpoint
+    embedder, threshold = TorchEmbedder.from_checkpoint(path)
+    params = PerUserThresholdParams(scale=1.0, weight=1.0, reference_spread=0.1)
+    engine = KeyAuthEngine(embedder, TemplateStore(), threshold, EngineConfig(enroll_samples=5), per_user=params)
+    results = [engine.enroll("app", "alice", a) for a in attempts(data, data.users[0], 5)]
+    assert results[-1].status == "complete"
+    stored = engine.store.get_user("app", "alice").threshold
+    assert stored is not None and 0.05 <= stored <= 0.2  # clipped to [0.5, 2] * reference_spread
 
 
 def test_checkpoint_that_is_not_keyauth_is_rejected(tmp_path):

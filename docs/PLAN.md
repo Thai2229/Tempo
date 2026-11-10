@@ -22,8 +22,10 @@ level with scaled Manhattan (22.14 +/- 5.98%). Details and caveats in docs/RESUL
   - Encoder shipped and runs through the Embedder protocol. The classic detectors tied it on test EER but need per-user statistics at scoring time, so they are not wired into the engine (docs/RESULTS.md; follow-up in C6b).
 
 ## C6b: Per-user verification (owner: ai-lead, backend-developer for engine wiring)
-- [ ] Per-user thresholds set at enrollment, to cut the false-reject rate (37.79% test FRR on split seed 0 at the global val threshold)
-- [ ] Optional support for the classic detectors in the engine (per-user statistics at scoring time)
+- [x] Per-user thresholds set at enrollment, to cut the false-reject rate (37.79% test FRR on split seed 0 at the global val threshold)
+  - Opt-in (`KeyAuthEngine(per_user=...)`), default off: on CMU they trade FRR for FAR (seed 0 test FRR 36.76 -> 31.76, FAR 13.93 -> 15.00) and leave EER within noise (docs/RESULTS.md, C6b).
+- [x] Optional support for the classic detectors in the engine (per-user statistics at scoring time)
+  - `KeyAuthEngine(embedder=None, scorer=ScaledManhattanScorer() | MahalanobisScorer())`; state persisted as JSON in the store.
 
 ## C7: HTTP API (owner: backend-developer)
 - [ ] FastAPI app in src/keyauth/api: POST /enroll, POST /verify, GET /status, DELETE /user, GET /health
