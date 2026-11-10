@@ -240,26 +240,84 @@ def test_status_404_then_200(client, typists):
     assert r.json() == {"user_id": "alice", "status": "enrolling", "enroll_samples": 1, "enroll_required": REQUIRED, "locked": False}
 
 
-def test_delete_then_not_enrolled(client, typists):
+ADMIN = "s3cret-token-0123456789"
+GOOD = {"Authorization": f"Bearer {ADMIN}"}
+
+
+def test_delete_then_not_enrolled(threshold, clock, typists):
     alice, _, rng = typists
+    client, _ = build(threshold, clock, admin_token=ADMIN)
     enroll_all(client, "alice", alice, rng)
-    assert client.delete("/user", params={"user_id": "alice"}).json() == {"deleted": True}
+    assert client.delete("/user", params={"user_id": "alice"}, headers=GOOD).json() == {"deleted": True}
     assert_error(client.get("/status", params={"user_id": "alice"}), 404, "not_enrolled")
     r = client.post("/verify", json={"user_id": "alice", "timings": timings_of(alice, rng)})
     assert_error(r, 404, "not_enrolled")
-    assert_error(client.delete("/user", params={"user_id": "alice"}), 404, "not_enrolled")
+    assert_error(client.delete("/user", params={"user_id": "alice"}, headers=GOOD), 404, "not_enrolled")
 
 
-def test_delete_requires_admin_token_when_configured(threshold, clock, typists):
+@pytest.mark.parametrize("token", [None, ""])
+@pytest.mark.parametrize("header", [None, "Bearer ", "Bearer", "Bearer None", "Bearer anything", "Basic abc"])
+def test_delete_refused_when_no_admin_token_configured(threshold, clock, typists, token, header):
     alice, _, rng = typists
-    client, _ = build(threshold, clock, admin_token="s3cret")
+    client, _ = build(threshold, clock, admin_token=token)
     enroll_all(client, "alice", alice, rng)
-    assert_error(client.delete("/user", params={"user_id": "alice"}), 401, "unauthorized")
-    bad = {"Authorization": "Bearer nope"}
-    assert_error(client.delete("/user", params={"user_id": "alice"}, headers=bad), 401, "unauthorized")
+    headers = {}
+    if header is not None:
+        headers["Authorization"] = header
+    r = client.delete("/user", params={"user_id": "alice"}, headers=headers)
+    assert_error(r, 401, "unauthorized")
+    assert "KEYAUTH_ADMIN_TOKEN" in r.json()["error"]["message"]
     assert client.get("/status", params={"user_id": "alice"}).status_code == 200
-    good = {"Authorization": "Bearer s3cret"}
-    assert client.delete("/user", params={"user_id": "alice"}, headers=good).status_code == 200
+
+
+@pytest.mark.parametrize("header", [None, "Bearer nope", "Bearer ", f"Basic {ADMIN}", ADMIN, f"bearer {ADMIN}"])
+def test_delete_with_token_configured_rejects_bad_credentials(threshold, clock, typists, header):
+    alice, _, rng = typists
+    client, _ = build(threshold, clock, admin_token=ADMIN)
+    enroll_all(client, "alice", alice, rng)
+    headers = {}
+    if header is not None:
+        headers["Authorization"] = header
+    assert_error(client.delete("/user", params={"user_id": "alice"}, headers=headers), 401, "unauthorized")
+    assert client.get("/status", params={"user_id": "alice"}).status_code == 200
+
+
+def test_short_admin_token_warns_but_works(threshold, clock, typists, caplog):
+    alice, _, rng = typists
+    with caplog.at_level(logging.WARNING, logger="keyauth.api"):
+        client, _ = build(threshold, clock, admin_token="short")
+    assert "KEYAUTH_ADMIN_TOKEN" in caplog.text
+    assert "short" not in caplog.text.replace("shorter", "")
+    enroll_all(client, "alice", alice, rng)
+    assert client.delete("/user", params={"user_id": "alice"}, headers={"Authorization": "Bearer short"}).status_code == 200
+
+
+# ---- per-user thresholds setting -------------------------------------------
+
+
+def test_per_user_is_on_by_default_and_env_can_disable():
+    assert Settings().per_user is True
+    assert Settings.from_env({}).per_user is True
+    assert Settings.from_env({"KEYAUTH_PER_USER": "1"}).per_user is True
+    for off in ["0", "false", "no", "off", ""]:
+        assert Settings.from_env({"KEYAUTH_PER_USER": off}).per_user is False
+
+
+def test_build_engine_falls_back_to_global_threshold_without_params(tmp_path, monkeypatch, caplog):
+    pytest.importorskip("torch")
+    from keyauth.api.app import build_engine
+    from keyauth.auth.embedder import TorchEmbedder
+
+    monkeypatch.setattr(TorchEmbedder, "from_checkpoint", staticmethod(lambda path: (fake_embedder, 0.5)))
+    monkeypatch.setattr(TorchEmbedder, "per_user_params", staticmethod(lambda path: None))
+    settings = Settings(checkpoint=str(tmp_path / "old.pt"), db_path=str(tmp_path / "k.db"))
+    with caplog.at_level(logging.WARNING, logger="keyauth.api"):
+        engine = build_engine(settings)
+    assert engine.per_user is None
+    assert engine.threshold == 0.5
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "old.pt" not in warnings[0].getMessage()
 
 
 # ---- validation -----------------------------------------------------------
