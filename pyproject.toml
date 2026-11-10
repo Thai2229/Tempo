@@ -15,7 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 app = ["fastapi>=0.110", "uvicorn>=0.27"]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "httpx2"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
