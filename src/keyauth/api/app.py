@@ -7,13 +7,14 @@ import hmac
 import logging
 import math
 import threading
+from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 import numpy as np
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -30,6 +31,14 @@ MAX_EVENTS = 4 * MAX_KEYS
 MAX_BODY_BYTES = 128 * 1024
 MIN_ADMIN_TOKEN_CHARS = 16
 USER_ID_PATTERN = r"^[A-Za-z0-9._@-]{1,64}$"
+
+STATIC_DIR = Path(__file__).resolve().parent.parent / "web" / "static"
+STATIC_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
+SECURITY_HEADERS = {
+    "Content-Security-Policy": "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
 
 UserId = Annotated[str, Field(min_length=1, max_length=64, pattern=USER_ID_PATTERN)]
 
@@ -259,6 +268,30 @@ def create_app(engine: KeyAuthEngine | None = None, settings: Settings | None = 
         if not deleted:
             raise ApiError(404, "not_enrolled", "user is not enrolled")
         return {"deleted": True}
+
+    # ---- demo page (KEYAUTH_SERVE_UI) -------------------------------------
+
+    def static_response(name: str) -> Response:
+        path = STATIC_DIR / name
+        media_type = STATIC_TYPES.get(path.suffix)
+        # only plain files directly inside STATIC_DIR with a known type; no traversal
+        if media_type is None or "/" in name or "\\" in name or name.startswith(".") or not path.is_file():
+            raise ApiError(404, "not_found", "Not Found")
+        return Response(path.read_bytes(), media_type=media_type, headers=SECURITY_HEADERS)
+
+    if settings.serve_ui:
+
+        @app.get("/", include_in_schema=False)
+        def index():
+            return static_response("index.html")
+
+        @app.get("/favicon.ico", include_in_schema=False)
+        def favicon():
+            return Response(status_code=204)  # no icon; avoids a console 404 in browsers
+
+        @app.get("/static/{name}", include_in_schema=False)
+        def static_file(name: str):
+            return static_response(name)
 
     return app
 

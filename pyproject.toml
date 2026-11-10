@@ -20,6 +20,12 @@ dev = ["pytest>=7", "httpx2"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"keyauth.web" = ["static/*"]
+
+[project.scripts]
+keyauth-demo = "keyauth.api.__main__:main"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

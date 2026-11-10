@@ -29,6 +29,7 @@ class Settings:
     rate_limit: int = 30  # max requests per window, per client IP and per user_id
     rate_window_s: float = 60.0
     admin_token: str | None = None  # DELETE /user needs "Authorization: Bearer <token>"; unset = refused
+    serve_ui: bool = True  # serve the demo page at / and its assets under /static
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -45,4 +46,5 @@ class Settings:
             rate_limit=limit,
             rate_window_s=window,
             admin_token=admin_token,
+            serve_ui=env.get("KEYAUTH_SERVE_UI", "1").strip().lower() in _TRUE,
         )

@@ -34,10 +34,10 @@ level with scaled Manhattan (22.14 +/- 5.98%). Details and caveats in docs/RESUL
 - [x] Tests with FastAPI TestClient covering accept, reject, locked, replay, not enrolled
 
 ## C8: Web login demo (owner: frontend-developer, fullstack for wiring)
-- [ ] Page that captures keydown/keyup with performance.now() for a fixed phrase and sends raw events
-- [ ] Enrollment flow (10 samples with progress), then login with password + rhythm check
-- [ ] Clear UI for accepted / rejected / locked, with the score shown in a debug mode
-- [ ] Served by the API app; one command to run locally
+- [x] Page that captures keydown/keyup with performance.now() for a fixed phrase and sends raw events
+- [x] Enrollment flow (10 samples with progress), then login with password + rhythm check
+- [x] Clear UI for accepted / rejected / locked, with the score shown in a debug mode
+- [x] Served by the API app; one command to run locally
 
 ## C9: Polish
 - [ ] README: what it is, how it works, results table, demo GIF, how to run

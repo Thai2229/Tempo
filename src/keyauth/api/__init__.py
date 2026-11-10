@@ -1,6 +1,9 @@
 """HTTP API for keyauth (FastAPI).
 
-Run:  python -m keyauth.api          (or: uvicorn keyauth.api:app)
+Run:  python -m keyauth.api          (or: keyauth-demo, or: uvicorn keyauth.api:app)
+Demo: the command above also serves the web page at http://127.0.0.1:8000/ (KEYAUTH_SERVE_UI=0 turns
+      it off). Without a checkpoint it still starts, the page shows "model not loaded", and a hint
+      is printed: python scripts/get_cmu.py && python -m keyauth.train --data cmu
 Config: environment variables, see .env.example. Needs `pip install -e ".[app]"`.
 
 The module-level `app` never fails on import: if the checkpoint cannot be loaded,
@@ -12,6 +15,7 @@ Endpoints
   GET    /status?user_id=
   DELETE /user?user_id=   (always needs Authorization: Bearer <KEYAUTH_ADMIN_TOKEN>)
   GET    /health
+  GET    /, /static/<file>   demo page and its assets (HTML carries a strict CSP; 404 JSON when disabled)
 
 Exactly one of `events` (raw keydown/keyup: [{key, type: "down"|"up", t in ms, code?}], as the
 browser captures them with performance.now()) or `timings` ([[hold, dd, ud], ...] in seconds) is
