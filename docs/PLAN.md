@@ -43,4 +43,4 @@ level with scaled Manhattan (22.14 +/- 5.98%). Details and caveats in docs/RESUL
 - [x] README: what it is, how it works, results table, demo GIF, how to run
 - [x] GitHub Actions CI running pytest
 - [x] Docker or one-click deploy option for the demo
-  - Dockerfile written; the full image build could not be verified in the cloud session (download.pytorch.org blocked, Docker Hub rate limit). See the C9 PR.
+  - Dockerfile; CI's `docker` job builds the image and smoke-tests it on every PR (the cloud session itself could not build it: download.pytorch.org blocked).
