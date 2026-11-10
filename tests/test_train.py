@@ -52,6 +52,40 @@ def test_checkpoint_roundtrip(trained, tmp_path):
     np.testing.assert_allclose(embed(model2, normalizer2, test_data), embed(model, normalizer, test_data), atol=1e-6)
 
 
+def test_checkpoint_stores_per_user_threshold_params(trained, tmp_path):
+    from keyauth.thresholds import PerUserThresholdParams
+
+    model, normalizer, _, _ = trained
+    params = PerUserThresholdParams(scale=1.5, weight=0.25, reference_spread=0.5)
+    path = tmp_path / "model.pt"
+    save_checkpoint(path, model, normalizer, threshold=0.42, metrics={}, per_user_threshold=params)
+    _, _, meta = load_checkpoint(path)
+    assert PerUserThresholdParams.from_meta(meta) == params
+
+
+def test_checkpoint_without_per_user_params_still_loads(trained, tmp_path):
+    from keyauth.thresholds import PerUserThresholdParams
+
+    model, normalizer, _, _ = trained
+    path = tmp_path / "old.pt"
+    # a pre-C6b checkpoint: exactly the keys the old save_checkpoint wrote
+    torch.save(
+        {
+            "format": "keyauth-v1",
+            "encoder_config": model.config.to_dict(),
+            "state_dict": model.state_dict(),
+            "normalizer": normalizer.to_dict(),
+            "threshold": 0.42,
+            "metrics": {},
+        },
+        path,
+    )
+    _, _, meta = load_checkpoint(path)
+    assert meta["threshold"] == pytest.approx(0.42)
+    assert meta["per_user_threshold"] is None
+    assert PerUserThresholdParams.from_meta(meta) is None
+
+
 def test_load_rejects_other_files(tmp_path):
     path = tmp_path / "other.pt"
     torch.save({"hello": 1}, path)
@@ -68,6 +102,9 @@ def test_cli_on_synthetic(tmp_path):
     assert 0.0 <= metrics["test"]["eer"] <= 1.0
     _, _, meta = load_checkpoint(out)
     assert meta["threshold"] == pytest.approx(metrics["val"]["eer_threshold"])
+    assert meta["per_user_threshold"] == report["per_user_threshold"]
+    assert meta["per_user_threshold"]["scale"] > 0
+    assert 0.0 <= metrics["test_per_user_threshold"]["frr"] <= 1.0
 
 
 def _small_split():

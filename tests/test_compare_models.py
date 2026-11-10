@@ -35,3 +35,10 @@ def test_ema_smooths_a_spike(compare):
 def test_mean_std_uses_sample_std(compare):
     assert compare.mean_std([1.0, 3.0]) == pytest.approx((2.0, 2.0**0.5))
     assert compare.mean_std([4.0]) == (4.0, 0.0)
+
+
+def test_enroll_rows_are_each_users_first_attempts(compare):
+    import numpy as np
+
+    rows = compare.enroll_rows(np.array(["b", "a", "b", "a", "b", "a"], dtype=object), n_enroll=2)
+    assert {u: r.tolist() for u, r in rows.items()} == {"a": [1, 3], "b": [0, 2]}

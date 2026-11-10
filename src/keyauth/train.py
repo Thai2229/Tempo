@@ -11,7 +11,8 @@ EER are reported on test users, who influenced neither the weights nor the
 threshold.
 
 The checkpoint holds everything the API needs: weights, encoder config,
-normalizer and threshold.
+normalizer, threshold, and the per-user threshold rule (keyauth.thresholds),
+also fitted on val users only.
 """
 
 from __future__ import annotations
@@ -29,13 +30,22 @@ import torch
 
 from keyauth.data import KeystrokeData, Normalizer, load_cmu, make_synthetic_dataset, split_users
 from keyauth.data.torch_dataset import KeystrokeDataset, PKBatchSampler
-from keyauth.evaluate import summarize, verification_scores
+from keyauth.evaluate import Scores, summarize, verification_scores
 from keyauth.model import (
     EncoderConfig,
     RhythmEncoder,
     TripletStats,
     batch_hard_triplet_loss,
     supervised_contrastive_loss,
+)
+from keyauth.thresholds import (
+    META_KEY,
+    PerUserThresholdParams,
+    embedding_loo_scores,
+    enrollment_spread,
+    fit_params,
+    normalize_scores,
+    references,
 )
 
 
@@ -82,6 +92,19 @@ def evaluate_split(model, normalizer, data: KeystrokeData, cfg: TrainConfig, thr
         embed(model, normalizer, data), data.user_ids, n_enroll=cfg.n_enroll, impostors_per_user=cfg.impostors_per_user
     )
     return summarize(scores, threshold)
+
+
+def per_user_inputs(
+    model: RhythmEncoder, normalizer: Normalizer, data: KeystrokeData, cfg: TrainConfig
+) -> tuple[Scores, dict[str, float]]:
+    """Verification scores and each user's enrollment spread, for keyauth.thresholds."""
+    z = embed(model, normalizer, data)
+    scores = verification_scores(z, data.user_ids, n_enroll=cfg.n_enroll, impostors_per_user=cfg.impostors_per_user)
+    spreads: dict[str, float] = {}
+    for u in scores.per_user:
+        enroll = z[np.flatnonzero(data.user_ids == u)[: cfg.n_enroll]]
+        spreads[u] = enrollment_spread(embedding_loo_scores(enroll))
+    return scores, spreads
 
 
 def compute_loss(emb: torch.Tensor, labels: torch.Tensor, cfg: TrainConfig) -> TripletStats:
@@ -162,31 +185,43 @@ def train(
 # ---- checkpoints --------------------------------------------------------
 
 
-def save_checkpoint(path: str | Path, model: RhythmEncoder, normalizer: Normalizer, threshold: float, metrics: dict) -> None:
+def save_checkpoint(
+    path: str | Path,
+    model: RhythmEncoder,
+    normalizer: Normalizer,
+    threshold: float,
+    metrics: dict,
+    per_user_threshold: PerUserThresholdParams | None = None,
+) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "format": "keyauth-v1",
-            "encoder_config": model.config.to_dict(),
-            "state_dict": model.state_dict(),
-            "normalizer": normalizer.to_dict(),
-            "threshold": float(threshold),
-            "metrics": metrics,
-        },
-        path,
-    )
+    ckpt = {
+        "format": "keyauth-v1",
+        "encoder_config": model.config.to_dict(),
+        "state_dict": model.state_dict(),
+        "normalizer": normalizer.to_dict(),
+        "threshold": float(threshold),
+        "metrics": metrics,
+    }
+    if per_user_threshold is not None:
+        ckpt[META_KEY] = per_user_threshold.to_dict()
+    torch.save(ckpt, path)
 
 
 def load_checkpoint(path: str | Path, device: str = "cpu") -> tuple[RhythmEncoder, Normalizer, dict]:
-    """Returns (model in eval mode, normalizer, {"threshold", "metrics"})."""
+    """Returns (model in eval mode, normalizer, {"threshold", "metrics", "per_user_threshold"}).
+
+    meta["per_user_threshold"] is a plain dict, or None for checkpoints written before C6b;
+    PerUserThresholdParams.from_meta(meta) turns it into params (or None).
+    """
     ckpt = torch.load(path, map_location=device, weights_only=True)
     if ckpt.get("format") != "keyauth-v1":
         raise ValueError(f"{path} is not a keyauth checkpoint")
     model = RhythmEncoder(EncoderConfig.from_dict(ckpt["encoder_config"])).to(device)
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
-    return model, Normalizer.from_dict(ckpt["normalizer"]), {"threshold": ckpt["threshold"], "metrics": ckpt["metrics"]}
+    meta = {"threshold": ckpt["threshold"], "metrics": ckpt["metrics"], META_KEY: ckpt.get(META_KEY)}
+    return model, Normalizer.from_dict(ckpt["normalizer"]), meta
 
 
 # ---- CLI ----------------------------------------------------------------
@@ -230,9 +265,28 @@ def main(argv: list[str] | None = None) -> dict:
         f"  at val threshold {threshold:.4f}: FAR {test['far'] * 100:.2f}%  FRR {test['frr'] * 100:.2f}%"
     )
 
-    metrics = {"val": val, "test": test, "train_config": asdict(cfg), "epochs_run": len(history)}
-    save_checkpoint(args.out, model, normalizer, threshold, metrics)
-    Path(args.out).with_suffix(".json").write_text(json.dumps({"history": history, **metrics}, indent=2))
+
+    # per-user thresholds (keyauth.thresholds): rule fitted on val users only, then reported on test
+    val_scores, val_spreads = per_user_inputs(model, normalizer, val_data, cfg)
+    params, _ = fit_params(val_scores, val_spreads)
+    test_scores, test_spreads = per_user_inputs(model, normalizer, test_data, cfg)
+    test_per_user = summarize(normalize_scores(test_scores, references(test_spreads, params)), threshold=params.scale)
+    print(
+        f"  per-user thresholds (weight {params.weight:.2f}, scale {params.scale:.4f}, "
+        f"reference spread {params.reference_spread:.4f}): FAR {test_per_user['far'] * 100:.2f}%  "
+        f"FRR {test_per_user['frr'] * 100:.2f}%"
+    )
+
+    metrics = {
+        "val": val,
+        "test": test,
+        "test_per_user_threshold": test_per_user,
+        "train_config": asdict(cfg),
+        "epochs_run": len(history),
+    }
+    save_checkpoint(args.out, model, normalizer, threshold, metrics, per_user_threshold=params)
+    meta_json = {"history": history, **metrics, "threshold": threshold, META_KEY: params.to_dict()}
+    Path(args.out).with_suffix(".json").write_text(json.dumps(meta_json, indent=2))
     print(f"saved {args.out}")
     return metrics
 

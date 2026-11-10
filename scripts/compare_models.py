@@ -4,7 +4,8 @@
     python scripts/compare_models.py dev     # encoder variants, development users only
     python scripts/compare_models.py stateless   # can a classic method fit the Embedder protocol?
     python scripts/compare_models.py engine  # the shipped checkpoint through the real engine, val users
-    python scripts/compare_models.py final   # the only command that reads test users
+    python scripts/compare_models.py final   # multi-seed comparison, reads test users
+    python scripts/compare_models.py peruser # C6b per-user thresholds, rule fitted on val, reads test users
     python scripts/compare_models.py table   # print the RESULTS.md tables from the JSON files
 
 Results are aggregate metrics, written as JSON to checkpoints/c6/ (gitignored).
@@ -34,11 +35,21 @@ import torch
 
 from keyauth.auth import EngineConfig, InvalidTimings, KeyAuthEngine, TemplateStore
 from keyauth.auth.embedder import TorchEmbedder
+from keyauth.auth.scorers import MahalanobisScorer, ScaledManhattanScorer, UserScorer, enrollment_loo_scores
 from keyauth.baselines import Detector, Mahalanobis, ScaledManhattan, detector_scores, timing_vectors
 from keyauth.data import KeystrokeData, Normalizer, load_cmu, split_users
 from keyauth.data.preprocess import EPS_S, valid_mask
-from keyauth.evaluate import summarize, verification_scores
+from keyauth.evaluate import Scores, summarize, verification_scores
 from keyauth.model import RhythmEncoder
+from keyauth.thresholds import (
+    WEIGHT_GRID,
+    PerUserThresholdParams,
+    embedding_loo_scores,
+    enrollment_spread,
+    fit_params,
+    normalize_scores,
+    references,
+)
 from keyauth.train import TrainConfig, embed, evaluate_split, load_checkpoint, train
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -357,6 +368,84 @@ def cmd_final(args: argparse.Namespace) -> None:
     print(write_json("final.json", payload))
 
 
+# ---- peruser: C6b per-user thresholds, fitted on val, reported on test ------
+
+
+def enroll_rows(user_ids: np.ndarray, n_enroll: int = N_ENROLL) -> dict[str, np.ndarray]:
+    """Each user's enrollment rows, the same "first n_enroll" rows that score_protocol uses."""
+    user_ids = np.asarray(user_ids)
+    return {u: np.flatnonzero(user_ids == u)[:n_enroll] for u in sorted(set(user_ids.tolist()))}
+
+
+def peruser_eval(val_scores: Scores, val_spreads: dict, test_scores: Scores, test_spreads: dict) -> dict:
+    """Before (one global threshold) and after (per-user thresholds) on val and test.
+
+    Every threshold and rule parameter comes from val; test only reports.
+    """
+    val = summarize(val_scores)
+    before = {"val": val, "test": summarize(test_scores, threshold=val["eer_threshold"])}
+    params, weight_eers = fit_params(val_scores, val_spreads)
+
+    def after_for(p: PerUserThresholdParams) -> dict:
+        out: dict = {"params": p.to_dict()}
+        for name, scores, spreads in (("val", val_scores, val_spreads), ("test", test_scores, test_spreads)):
+            refs = references(spreads, p)
+            clipped = [abs(refs[u] - (p.weight * s + (1 - p.weight) * p.reference_spread)) > 1e-12 for u, s in spreads.items()]
+            out[name] = summarize(normalize_scores(scores, refs), threshold=p.scale)
+            out[name]["clipped_users"] = int(sum(clipped))
+            out[name]["thresholds"] = [p.scale * r for r in refs.values()]
+        return out
+
+    # fixed-weight rows are reported for reading only; the rule uses the val-selected weight
+    fixed = {str(w): after_for(fit_params(val_scores, val_spreads, weights=[w])[0]) for w in WEIGHT_GRID}
+    return {"before": before, "after": after_for(params), "val_eer_by_weight": weight_eers, "fixed_weight": fixed}
+
+
+def detector_peruser(scorer: UserScorer, data: KeystrokeData) -> tuple[Scores, dict]:
+    vectors = timing_vectors(data)
+    spreads = {u: enrollment_spread(enrollment_loo_scores(scorer, vectors[idx])) for u, idx in enroll_rows(data.user_ids).items()}
+    return detector_scores(as_detector(scorer), data, N_ENROLL), spreads
+
+
+def as_detector(scorer: UserScorer) -> Detector:
+    """The baselines.Detector with the same settings as `scorer`, for the batch protocol."""
+    if isinstance(scorer, MahalanobisScorer):
+        return Mahalanobis(shrinkage=scorer.shrinkage, min_scale=scorer.min_scale)
+    return ScaledManhattan(min_scale=scorer.min_scale)
+
+
+def peruser_job(seed: int) -> dict:
+    torch.set_num_threads(THREADS_PER_WORKER)
+    train_data, val_data, test_data = split_users(load_cmu(CMU_PATH), seed=seed)
+    out: dict = {"seed": seed}
+
+    # encoder: the shipped recipe (defaults), same run as `final`'s encoder_after
+    cfg = TrainConfig(n_enroll=N_ENROLL, seed=seed)
+    model, normalizer, _ = train(train_data, val_data, cfg, log=lambda s: None)
+    parts = []
+    for d in (val_data, test_data):
+        z = embed(model, normalizer, d)
+        spreads = {u: enrollment_spread(embedding_loo_scores(z[idx])) for u, idx in enroll_rows(d.user_ids).items()}
+        parts.extend([verification_scores(z, d.user_ids, N_ENROLL), spreads])
+    out["encoder"] = peruser_eval(*parts)
+
+    out["scaled_manhattan"] = peruser_eval(
+        *detector_peruser(ScaledManhattanScorer(), val_data), *detector_peruser(ScaledManhattanScorer(), test_data)
+    )
+    # shrinkage picked on val users only, as in `final`
+    val_eers = [summarize(detector_scores(Mahalanobis(shrinkage=s), val_data, N_ENROLL))["eer"] for s in SHRINKAGE_GRID]
+    scorer = MahalanobisScorer(shrinkage=SHRINKAGE_GRID[int(np.argmin(val_eers))])
+    out["mahalanobis"] = peruser_eval(*detector_peruser(scorer, val_data), *detector_peruser(scorer, test_data))
+    out["mahalanobis"]["shrinkage"] = scorer.shrinkage
+    return out
+
+
+def cmd_peruser(args: argparse.Namespace) -> None:
+    with ProcessPoolExecutor(args.workers) as pool:
+        runs = list(pool.map(peruser_job, FINAL_SEEDS))
+    print(write_json("peruser.json", {"seeds": list(FINAL_SEEDS), "n_enroll": N_ENROLL, "runs": runs}))
+
+
 # ---- table ------------------------------------------------------------------
 
 
@@ -498,6 +587,57 @@ def print_final() -> None:
         print(f"\nOld checkpoint re-scored on split seed 0: val {old['val']['eer'] * 100:.2f}, test {old['test']['eer'] * 100:.2f}")
 
 
+PERUSER_METHODS = ("encoder", "scaled_manhattan", "mahalanobis")
+
+
+def print_peruser() -> None:
+    data = read_json("peruser.json")
+    runs = data["runs"]
+    by_seed = {r["seed"]: r for r in runs}
+    cols = (("val", "eer"), ("val", "far"), ("val", "frr"), ("test", "eer"), ("test", "far"), ("test", "frr"))
+    header = "| method | thresholds | val EER | val FAR | val FRR | test EER | test FAR | test FRR |"
+    for title, group in (
+        (f"split seeds {data['seeds']} (mean +/- sample std, %)", runs),
+        ("split seed 0 only (%)", [by_seed[0]]),
+    ):
+        print(f"\n### C6b before / after, CMU, {data['n_enroll']} enrollment attempts, {title}\n")
+        print(header)
+        print("|---|---|---|---|---|---|---|---|")
+        for m in PERUSER_METHODS:
+            for label, key in (("global (before)", "before"), ("per-user (after)", "after")):
+                cells = []
+                for split, metric in cols:
+                    mean, std = mean_std([r[m][key][split][metric] for r in group])
+                    cell = f"{mean * 100:.2f}"
+                    if len(group) > 1:
+                        cell = pct(mean, std)
+                    cells.append(cell)
+                print(f"| {m} | {label} | " + " | ".join(cells) + " |")
+    print("\n### Rule chosen on val, per seed\n")
+    print("| method | seed | weight | scale | reference spread | global-equivalent threshold | users clipped val / test | test FAR before -> after | test FRR before -> after |")
+    print("|---|---|---|---|---|---|---|---|---|")
+    for m in PERUSER_METHODS:
+        for r in sorted(runs, key=lambda x: x["seed"]):
+            p = r[m]["after"]["params"]
+            b, a = r[m]["before"]["test"], r[m]["after"]["test"]
+            print(
+                f"| {m} | {r['seed']} | {p['weight']:.2f} | {p['scale']:.4f} | {p['reference_spread']:.4f} "
+                f"| {p['scale'] * p['reference_spread']:.4f} | {r[m]['after']['val']['clipped_users']} / {a['clipped_users']} "
+                f"| {b['far'] * 100:.2f} -> {a['far'] * 100:.2f} | {b['frr'] * 100:.2f} -> {a['frr'] * 100:.2f} |"
+            )
+    print("\n### Fixed weight (not used for any choice; seeds 0-4 mean, %)\n")
+    print("| method | weight | val EER | test EER | test FAR | test FRR |")
+    print("|---|---|---|---|---|---|")
+    for m in PERUSER_METHODS:
+        for w in WEIGHT_GRID:
+            rows = [r[m]["fixed_weight"][str(w)] for r in runs]
+            print(
+                f"| {m} | {w:.2f} | {pct(*mean_std([x['val']['eer'] for x in rows]))} "
+                f"| {pct(*mean_std([x['test']['eer'] for x in rows]))} | {pct(*mean_std([x['test']['far'] for x in rows]))} "
+                f"| {pct(*mean_std([x['test']['frr'] for x in rows]))} |"
+            )
+
+
 def cmd_table(args: argparse.Namespace) -> None:
     printers = (
         ("noise.json", print_noise),
@@ -505,6 +645,7 @@ def cmd_table(args: argparse.Namespace) -> None:
         ("stateless.json", print_stateless),
         ("engine.json", print_engine),
         ("final.json", print_final),
+        ("peruser.json", print_peruser),
     )
     for name, printer in printers:
         if (OUT_DIR / name).exists():
@@ -529,6 +670,9 @@ def main(argv: list[str] | None = None) -> None:
     final.add_argument("--workers", type=int, default=4)
     final.add_argument("--before-checkpoint", type=Path, default=None)
     final.set_defaults(run=cmd_final)
+    peruser = sub.add_parser("peruser")
+    peruser.add_argument("--workers", type=int, default=4)
+    peruser.set_defaults(run=cmd_peruser)
     sub.add_parser("table").set_defaults(run=cmd_table)
     args = ap.parse_args(argv)
     args.run(args)

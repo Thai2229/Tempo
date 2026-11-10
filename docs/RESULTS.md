@@ -158,10 +158,154 @@ their accuracy:
 The encoder shipped, so the engine needed no change. Preferring a classic detector later would need a per-user
 scoring path in the engine, which is a design decision left open (see docs/PLAN.md).
 
+C6b adds that scoring path's model half in src/keyauth/auth/scorers.py: `timing_vector` (one validated attempt ->
+raw timing vector), `ScaledManhattanScorer` / `MahalanobisScorer` with `fit(enroll) -> ScorerState` and
+`score(state, vector) -> float`, and JSON (de)serialization of the state so the store can persist it. Scores are
+identical to keyauth.baselines. The engine wiring is not done yet.
+
+## C6b: per-user thresholds
+
+CMU, real data, 10 enrollment attempts, unseen users, split seeds 0 to 4 (the protocol above). Nothing here is
+synthetic. **Every threshold and rule parameter was picked on val users only; test users only report.**
+
+**Verdict: per-user thresholds do not measurably help.** Mean test EER moves by -0.26 points for the encoder, 0.00
+for scaled Manhattan and -0.05 for Mahalanobis, far inside the split noise (std 5 to 10). On split seed 0 the shipped
+encoder trades FRR for FAR: test FRR 36.76% -> 31.76%, FAR 13.93% -> 15.00%. The 37.79% FRR problem is mostly
+a global offset (the val threshold is too strict for these 8 test users), and a rule built from enrollment
+attempts cannot see that.
+
+### The rule (src/keyauth/thresholds.py)
+
+For one user, from their own N = 10 enrollment attempts only:
+
+```
+loo_i       = score of enrollment attempt i against a model fitted on the other 9  (leave-one-out)
+spread_u    = median_i loo_i
+ref_u       = clip(weight * spread_u + (1 - weight) * reference_spread, 0.5 * reference_spread, 2 * reference_spread)
+threshold_u = scale * ref_u            accept if score <= threshold_u
+```
+
+The same rule works for any "lower = more genuine" score: encoder distance to the template, scaled Manhattan,
+Mahalanobis. Only the three global numbers change per scorer. They are fitted on val users only:
+
+- `reference_spread` = median `spread_u` over val users.
+- `weight` from the grid {0, 0.25, 0.5, 0.75, 1}, the one with the lowest val EER (ties go to the smaller weight).
+  `weight = 0` is exactly the old global threshold, so the grid contains the baseline.
+- `scale` = the EER threshold of the val scores divided by `ref_u`.
+- The clip ratios 0.5 and 2 are fixed, not tuned. They are a safety bound so one sloppy enrollment cannot loosen a
+  threshold without limit. They bound only 1 val user on 1 of 15 (method, seed) runs.
+
+The EER "after" is the global EER of `score / ref_u`, which is the EER that per-user thresholds of this form can reach.
+FAR and FRR "after" are at the val-fitted `scale`.
+
+### Before / after
+
+**Split seeds 0 to 4 (mean +/- sample std, %)**
+
+| method | thresholds | val EER | val FAR | val FRR | test EER | test FAR | test FRR |
+|---|---|---|---|---|---|---|---|
+| encoder | global (before) | 18.86 +/- 4.68 | 18.86 +/- 4.70 | 18.87 +/- 4.65 | 21.50 +/- 9.52 | 20.36 +/- 11.58 | 24.64 +/- 11.16 |
+| encoder | per-user (after) | 18.06 +/- 4.69 | 18.07 +/- 4.72 | 18.05 +/- 4.67 | 21.24 +/- 10.20 | 20.79 +/- 13.25 | 24.01 +/- 8.93 |
+| scaled_manhattan | global (before) | 23.72 +/- 1.57 | 23.71 +/- 1.57 | 23.73 +/- 1.56 | 22.14 +/- 5.98 | 26.71 +/- 10.80 | 19.15 +/- 6.67 |
+| scaled_manhattan | per-user (after) | 23.16 +/- 2.24 | 23.14 +/- 2.25 | 23.19 +/- 2.23 | 22.14 +/- 5.98 | 26.71 +/- 9.89 | 18.13 +/- 5.14 |
+| mahalanobis | global (before) | 22.45 +/- 2.62 | 22.43 +/- 2.57 | 22.48 +/- 2.68 | 23.27 +/- 4.89 | 25.36 +/- 10.15 | 21.20 +/- 7.04 |
+| mahalanobis | per-user (after) | 22.08 +/- 2.61 | 22.07 +/- 2.57 | 22.10 +/- 2.66 | 23.22 +/- 4.98 | 26.07 +/- 9.20 | 20.01 +/- 6.84 |
+
+**Split seed 0 only (%)**
+
+| method | thresholds | val EER | val FAR | val FRR | test EER | test FAR | test FRR |
+|---|---|---|---|---|---|---|---|
+| encoder | global (before) | 13.29 | 13.21 | 13.37 | 21.79 | 13.93 | 36.76 |
+| encoder | per-user (after) | 13.21 | 13.21 | 13.21 | 21.42 | 15.00 | 31.76 |
+| scaled_manhattan | global (before) | 23.61 | 23.57 | 23.65 | 26.06 | 28.93 | 23.46 |
+| scaled_manhattan | per-user (after) | 23.61 | 23.57 | 23.65 | 26.06 | 28.93 | 23.46 |
+| mahalanobis | global (before) | 25.79 | 25.71 | 25.87 | 28.21 | 29.29 | 25.38 |
+| mahalanobis | per-user (after) | 25.79 | 25.71 | 25.87 | 28.21 | 29.29 | 25.38 |
+
+The detector rows on seed 0 are identical because val picked `weight = 0`, which is the global threshold.
+
+**Rule chosen on val, per seed**
+
+| method | seed | weight | scale | reference spread | global-equivalent threshold | users clipped val / test | test FAR before -> after | test FRR before -> after |
+|---|---|---|---|---|---|---|---|---|
+| encoder | 0 | 0.25 | 1.5727 | 0.4822 | 0.7584 | 0 / 0 | 13.93 -> 15.00 | 36.76 -> 31.76 |
+| encoder | 1 | 0.00 | 1.5929 | 0.5062 | 0.8064 | 0 / 0 | 17.14 -> 17.14 | 29.68 -> 29.68 |
+| encoder | 2 | 0.00 | 1.6270 | 0.5259 | 0.8556 | 0 / 0 | 17.50 -> 17.50 | 10.16 -> 10.16 |
+| encoder | 3 | 0.75 | 1.6957 | 0.4563 | 0.7737 | 1 / 0 | 40.71 -> 43.93 | 30.80 -> 28.40 |
+| encoder | 4 | 0.25 | 1.3724 | 0.5401 | 0.7412 | 0 / 0 | 12.50 -> 10.36 | 15.80 -> 20.06 |
+| scaled_manhattan | 0 | 0.00 | 1.7495 | 36.1865 | 63.3073 | 0 / 0 | 28.93 -> 28.93 | 23.46 -> 23.46 |
+| scaled_manhattan | 1 | 1.00 | 1.6096 | 36.4986 | 58.7488 | 0 / 0 | 23.21 -> 25.71 | 28.27 -> 23.17 |
+| scaled_manhattan | 2 | 0.00 | 1.7701 | 33.8596 | 59.9340 | 0 / 0 | 29.64 -> 29.64 | 12.18 -> 12.18 |
+| scaled_manhattan | 3 | 0.75 | 1.7830 | 37.0128 | 65.9931 | 0 / 0 | 40.71 -> 38.21 | 17.76 -> 17.76 |
+| scaled_manhattan | 4 | 0.00 | 1.7791 | 34.8641 | 62.0271 | 0 / 0 | 11.07 -> 11.07 | 14.10 -> 14.10 |
+| mahalanobis | 0 | 0.00 | 1.6976 | 6.4630 | 10.9719 | 0 / 0 | 29.29 -> 29.29 | 25.38 -> 25.38 |
+| mahalanobis | 1 | 1.00 | 1.6215 | 6.5378 | 10.6009 | 0 / 0 | 20.36 -> 27.50 | 26.51 -> 17.92 |
+| mahalanobis | 2 | 0.00 | 1.9134 | 12.6490 | 24.2026 | 0 / 0 | 32.86 -> 32.86 | 9.01 -> 9.01 |
+| mahalanobis | 3 | 1.00 | 1.7144 | 7.2123 | 12.3651 | 0 / 0 | 34.29 -> 30.71 | 22.44 -> 25.06 |
+| mahalanobis | 4 | 0.00 | 1.6923 | 14.2104 | 24.0481 | 0 / 0 | 10.00 -> 10.00 | 22.66 -> 22.66 |
+
+Mahalanobis shrinkage is picked on val per seed, as in `final`: 0.9, 1.0, 0.1, 0.7, 0.1 for seeds 0 to 4. The
+weight val picks jumps between 0 and 1 from seed to seed, another sign that there is little signal to fit.
+
+**Fixed weight, read only: nothing was chosen from this table (seeds 0 to 4, %)**
+
+| method | weight | val EER | test EER | test FAR | test FRR |
+|---|---|---|---|---|---|
+| encoder | 0.00 | 18.86 +/- 4.68 | 21.50 +/- 9.52 | 20.36 +/- 11.58 | 24.64 +/- 11.16 |
+| encoder | 0.25 | 18.42 +/- 4.62 | 20.86 +/- 9.36 | 19.64 +/- 12.96 | 24.15 +/- 7.61 |
+| encoder | 0.50 | 18.75 +/- 4.99 | 21.37 +/- 9.22 | 19.86 +/- 14.02 | 25.29 +/- 4.37 |
+| encoder | 0.75 | 19.65 +/- 5.27 | 23.00 +/- 9.46 | 21.43 +/- 15.08 | 27.92 +/- 5.29 |
+| encoder | 1.00 | 22.13 +/- 6.08 | 25.27 +/- 9.56 | 24.00 +/- 17.76 | 31.11 +/- 10.45 |
+| scaled_manhattan | 0.00 | 23.72 +/- 1.57 | 22.14 +/- 5.98 | 26.71 +/- 10.80 | 19.15 +/- 6.67 |
+| scaled_manhattan | 0.25 | 23.94 +/- 2.08 | 22.17 +/- 6.05 | 27.00 +/- 10.66 | 19.21 +/- 6.46 |
+| scaled_manhattan | 0.50 | 24.01 +/- 2.20 | 22.35 +/- 5.97 | 26.71 +/- 10.04 | 19.01 +/- 6.49 |
+| scaled_manhattan | 0.75 | 23.79 +/- 2.80 | 22.56 +/- 5.61 | 27.07 +/- 9.90 | 18.54 +/- 6.45 |
+| scaled_manhattan | 1.00 | 23.89 +/- 3.03 | 22.80 +/- 5.55 | 27.79 +/- 10.22 | 18.69 +/- 6.53 |
+| mahalanobis | 0.00 | 22.45 +/- 2.62 | 23.27 +/- 4.89 | 25.36 +/- 10.15 | 21.20 +/- 7.04 |
+| mahalanobis | 0.25 | 22.77 +/- 2.93 | 23.28 +/- 4.95 | 26.29 +/- 9.10 | 20.82 +/- 6.99 |
+| mahalanobis | 0.50 | 23.66 +/- 3.06 | 23.50 +/- 4.54 | 26.79 +/- 8.41 | 20.85 +/- 7.01 |
+| mahalanobis | 0.75 | 24.40 +/- 3.01 | 23.51 +/- 4.31 | 27.21 +/- 7.39 | 20.76 +/- 7.22 |
+| mahalanobis | 1.00 | 24.63 +/- 3.77 | 23.79 +/- 3.93 | 28.07 +/- 7.61 | 20.37 +/- 7.67 |
+
+A fully proportional threshold (weight 1) is clearly worse for the encoder (test FRR 31.11 against 24.64).
+
+### Why it does not help
+
+- **The classic detectors already normalize by the user's own spread.** Scaled Manhattan divides by each feature's
+  mean absolute deviation and Mahalanobis by the covariance, so a loose typist does not get larger scores. On the 43
+  development users (seed-0 test users excluded), the Spearman correlation between `spread_u` and the user's median
+  genuine score is -0.03 (scaled Manhattan) and -0.04 (Mahalanobis, shrinkage 0.9). The rule has nothing to correct.
+- **For the encoder the spread does predict genuine distances** (Spearman 0.88 on the 8 seed-0 val users, shipped
+  checkpoint), but impostor distances to a loose user's template are also larger, so loosening that user's threshold
+  admits impostors at about the rate it saves genuine attempts.
+- **Drift is not visible at enrollment.** Enrollment is the first 10 attempts of session 1, and genuine attempts span
+  8 sessions. On development users the median genuine score is about 1.3 to 1.4 times the enrollment spread over all
+  sessions, but 1.0 to 1.1 within session 1.
+
+### Shipped checkpoint
+
+`python -m keyauth.train --data cmu` now also fits the rule on val users and writes it to the checkpoint and to
+model.json under `"per_user_threshold"`: weight 0.25, scale 1.5727, reference spread 0.4822 (global-equivalent
+threshold 0.7584, close to the global val threshold 0.7568). Checkpoints without that key still load
+(`PerUserThresholdParams.from_meta` returns None, and the engine keeps its global threshold).
+
+This run, on a 4-core container: val 13.29, test 21.79, threshold 0.7568, test FAR 13.93 / FRR 36.76. The C6
+numbers above (val 13.56, test 21.84, threshold 0.7545, FAR 14.29 / FRR 37.79) came from another machine. The small
+differences come from CPU thread count. The `peruser` encoder runs are separate trainings with 2 threads per
+worker, so their val EERs differ slightly from the `final` table (mean 18.86 against 18.76).
+
+### Cost
+
+No paid API. On CPU, setting one user's threshold at enrollment takes about 0.2 ms for the encoder (10 template
+means; embeddings already computed), 0.4 ms for scaled Manhattan and 2.5 ms for Mahalanobis (10 fits with a 31x31
+pseudo-inverse). Scoring one login with a stored detector state takes about 0.01 ms. A Mahalanobis state is about
+20 KB as JSON (31x31 precision matrix in float64).
+
 ## Known failure cases
 
 - Split seed 3: encoder test EER 36.06%, the worst of the four methods on that split.
-- At the val threshold on split seed 0, FRR is 37.79%: more than one genuine login in three is rejected.
+- At the val threshold on split seed 0, FRR is 37.79%: more than one genuine login in three is rejected. Per-user
+  thresholds (C6b) bring it to 31.76% at a FAR of 15.00% in this container's run, a trade rather than a fix.
 - 10 enrollment attempts is short. Killourhy and Maxion (2009) enrolled with 200 attempts and report lower EER.
 - Run through the engine on val users, validation refused 1 of 3,400 attempts (a CMU timing above the sanity bounds).
   The EER tables include such attempts.
@@ -184,6 +328,7 @@ python scripts/compare_models.py final --before-checkpoint PATH/TO/OLD/model.pt 
 python scripts/compare_models.py table       # prints every table on this page
 python -m keyauth.train --data cmu           # writes the shipped checkpoints/model.pt and model.json
 python scripts/compare_models.py engine      # shipped checkpoint through the engine, val users (latency, refusals)
+python scripts/compare_models.py peruser     # C6b per-user thresholds, rule fitted on val, reads test users
 ```
 
 JSON output goes to checkpoints/c6/ (gitignored). `--before-checkpoint` is optional and only adds the "Old checkpoint"
