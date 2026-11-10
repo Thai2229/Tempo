@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from keyauth.data import KeystrokeData, Normalizer
+from keyauth.thresholds import PerUserThresholdParams
 from keyauth.train import embed, load_checkpoint
 
 
@@ -20,6 +21,12 @@ class TorchEmbedder:
         """Returns (embedder, threshold chosen during training)."""
         model, normalizer, meta = load_checkpoint(path, device=device)
         return cls(model, normalizer), float(meta["threshold"])
+
+    @staticmethod
+    def per_user_params(path: str | Path, device: str = "cpu") -> PerUserThresholdParams | None:
+        """Per-user threshold rule stored in the checkpoint, or None for checkpoints written before C6b."""
+        _, _, meta = load_checkpoint(path, device=device)
+        return PerUserThresholdParams.from_meta(meta)
 
     def __call__(self, timings: np.ndarray) -> np.ndarray:
         data = KeystrokeData.from_arrays([timings], ["_"])

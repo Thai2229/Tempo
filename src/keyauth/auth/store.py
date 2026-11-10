@@ -3,7 +3,8 @@
 What is stored, per (app_id, user_id):
   users    template embedding, password length, status, lockout state
   samples  embeddings of enrollment attempts and recent accepted logins
-           (used to rebuild templates and to detect replayed attempts)
+           (used to rebuild templates and to detect replayed attempts); in
+           scorer mode the engine stores raw timing vectors in seconds instead
 
 Raw timings and typed characters are never stored. app_id namespaces
 everything, so two apps can both have a user called "alice".
@@ -24,8 +25,9 @@ CREATE TABLE IF NOT EXISTS users (
     user_id       TEXT NOT NULL,
     n_keys        INTEGER NOT NULL,
     status        TEXT NOT NULL,           -- 'enrolling' | 'active'
-    template      BLOB,                    -- float32 unit vector, NULL while enrolling
+    template      BLOB,                    -- float32 unit vector, NULL while enrolling / in scorer mode
     threshold     REAL,                    -- per-user override, NULL = engine default
+    scorer_state  TEXT,                    -- JSON ScorerState (scorer mode only), NULL otherwise
     failures      INTEGER NOT NULL DEFAULT 0,
     locked_until  REAL NOT NULL DEFAULT 0,
     created_at    REAL NOT NULL,
@@ -54,6 +56,7 @@ class UserRecord:
     threshold: float | None
     failures: int
     locked_until: float
+    scorer_state: str | None = None
 
 
 def _to_blob(v: np.ndarray) -> bytes:
@@ -72,6 +75,10 @@ class TemplateStore:
         self._lock = threading.Lock()
         with self._lock, self._conn:
             self._conn.executescript(_SCHEMA)
+            # databases created before scorer mode lack the column
+            columns = [r[1] for r in self._conn.execute("PRAGMA table_info(users)").fetchall()]
+            if "scorer_state" not in columns:
+                self._conn.execute("ALTER TABLE users ADD COLUMN scorer_state TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -81,7 +88,7 @@ class TemplateStore:
     def get_user(self, app_id: str, user_id: str) -> UserRecord | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT n_keys, status, template, threshold, failures, locked_until "
+                "SELECT n_keys, status, template, threshold, failures, locked_until, scorer_state "
                 "FROM users WHERE app_id = ? AND user_id = ?",
                 (app_id, user_id),
             ).fetchone()
@@ -90,7 +97,7 @@ class TemplateStore:
         template = None
         if row[2] is not None:
             template = _from_blob(row[2])
-        return UserRecord(app_id, user_id, row[0], row[1], template, row[3], row[4], row[5])
+        return UserRecord(app_id, user_id, row[0], row[1], template, row[3], row[4], row[5], row[6])
 
     def create_user(self, app_id: str, user_id: str, n_keys: int, now: float) -> None:
         with self._lock, self._conn:
@@ -105,6 +112,14 @@ class TemplateStore:
             self._conn.execute(
                 "UPDATE users SET template = ?, status = 'active', updated_at = ? WHERE app_id = ? AND user_id = ?",
                 (_to_blob(template), now, app_id, user_id),
+            )
+
+    def set_scorer_state(self, app_id: str, user_id: str, state_json: str, now: float) -> None:
+        """Scorer-mode counterpart of set_template: keeps the fitted state and activates the user."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE users SET scorer_state = ?, status = 'active', updated_at = ? WHERE app_id = ? AND user_id = ?",
+                (state_json, now, app_id, user_id),
             )
 
     def set_threshold(self, app_id: str, user_id: str, threshold: float | None) -> None:
