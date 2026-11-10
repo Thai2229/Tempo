@@ -28,10 +28,10 @@ level with scaled Manhattan (22.14 +/- 5.98%). Details and caveats in docs/RESUL
   - `KeyAuthEngine(embedder=None, scorer=ScaledManhattanScorer() | MahalanobisScorer())`; state persisted as JSON in the store.
 
 ## C7: HTTP API (owner: backend-developer)
-- [ ] FastAPI app in src/keyauth/api: POST /enroll, POST /verify, GET /status, DELETE /user, GET /health
-- [ ] Request validation reuses auth/validation.py; consistent error shapes
-- [ ] Rate limiting / lockout surfaced in responses; no raw timings or embeddings in logs
-- [ ] Tests with FastAPI TestClient covering accept, reject, locked, replay, not enrolled
+- [x] FastAPI app in src/keyauth/api: POST /enroll, POST /verify, GET /status, DELETE /user, GET /health
+- [x] Request validation reuses auth/validation.py; consistent error shapes
+- [x] Rate limiting / lockout surfaced in responses; no raw timings or embeddings in logs
+- [x] Tests with FastAPI TestClient covering accept, reject, locked, replay, not enrolled
 
 ## C8: Web login demo (owner: frontend-developer, fullstack for wiring)
 - [ ] Page that captures keydown/keyup with performance.now() for a fixed phrase and sends raw events
