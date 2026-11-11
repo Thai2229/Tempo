@@ -50,15 +50,17 @@ Goal: a model that works on any password (C10-C11), then a Turnstile-style servi
 Split agreed with the owner: Claude builds C12-C13 and the C10 loader/training scripts; the owner leads the C11
 experiments and their interpretation.
 
-Where we stopped: C10 not started. The Aalto host (userinterfaces.aalto.fi) is blocked by the cloud environment's
-network policy; the owner declined adding it for now. To resume, either allow that host in the environment settings
-or download the data on the owner's PC. Nothing for C10-C13 is implemented yet.
+Where we stopped: C10 done (data script, loader, sentence split; stats in docs/RESULTS.md). userinterfaces.aalto.fi is
+now allowed in the "projects" cloud environment. Next is C11, led by the owner. Open questions for C11 are in the C10 PR
+(correction policy, min sentences per participant, on-screen keyboards, CMU's trailing Enter). License: non-commercial
+only, so C12-C13 stay a portfolio demo unless the authors grant permission.
 
 ## C10: Phrase-independent data (owner: ai-lead)
-- [ ] Owner reads the Aalto "136M Keystrokes" dataset license/terms (Dhakal et al., CHI 2018) before any download
-- [ ] scripts/get_aalto.py: download a subset (~10k participants) into data/, validated, fail clearly if unreachable
-- [ ] Loader: per-participant press/release times -> (hold, dd, ud) timings, user-disjoint splits; never commit the data
-- [ ] Keep key identity optional in the loader so C11 can measure what the page's anonymization costs
+- [x] Owner reads the Aalto "136M Keystrokes" dataset license/terms (Dhakal et al., CHI 2018) before any download
+  - "free to use for non-commercial use in your own research or projects with attribution"; nothing on redistribution, so the data is never committed or re-hosted.
+- [x] scripts/get_aalto.py: download a subset (~10k participants) into data/, validated, fail clearly if unreachable
+- [x] Loader: per-participant press/release times -> (hold, dd, ud) timings, user-disjoint splits; never commit the data
+- [x] Keep key identity optional in the loader so C11 can measure what the page's anonymization costs
 
 ## C11: Train and evaluate on unseen phrases (owner: the project owner leads; ai-lead supports)
 - [ ] Contrastive training where "same class" = same person across different sentences

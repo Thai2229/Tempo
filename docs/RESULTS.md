@@ -334,3 +334,54 @@ python scripts/compare_models.py peruser     # C6b per-user thresholds, rule fit
 JSON output goes to checkpoints/c6/ (gitignored). `--before-checkpoint` is optional and only adds the "Old checkpoint"
 line; the pre-C6 file is gitignored and is not in the repo. Runs use 2 CPU threads per worker, so exact digits may
 differ on other machines or thread counts. The soft-margin variant was removed from the code and from `dev`.
+
+## C10: Aalto data
+
+Dataset statistics only; no model results yet (that is C11).
+
+**Source.** "136M Keystrokes": Vivek Dhakal, Anna Maria Feit, Per Ola Kristensson, Antti Oulasvirta. Observations on
+Typing from 136 Million Keystrokes. CHI 2018. https://doi.org/10.1145/3173574.3174220,
+https://userinterfaces.aalto.fi/136Mkeystrokes/. 168,593 participants of an online typing test, 15 transcribed
+sentences each, drawn from a pool of 1,525 sentences.
+
+**License (readme.txt):** "You are free to use this data for non-commercial use in your own research or projects with
+attribution to the authors." The data stays in data/aalto/ (gitignored) and is never committed.
+
+**Subset.** `python scripts/get_aalto.py` (10,000 participants, seed 0) reads the zip's central directory with HTTP
+range requests and fetches only readme.txt, metadata_participants.txt and the chosen participant files: 150 MB
+downloaded (20 MB central directory, 7 MB metadata, about 10 KB per participant), 10,012 range requests, 21 minutes
+with 4 parallel requests, 1.14 GB on disk. The full archive is 1.5 GB zipped and 16 GB unzipped.
+
+**Format found.** files/<id>_keystrokes.txt, tab separated, UTF-8, columns PARTICIPANT_ID, TEST_SECTION_ID,
+SENTENCE, USER_INPUT, KEYSTROKE_ID, PRESS_TIME, RELEASE_TIME, LETTER, KEYCODE. One row per key press with its release
+already paired, times in Unix epoch milliseconds. LETTER is often empty or a name (SHIFT, BKSP, CAPS_LOCK, ARW_LEFT,
+...), so key identity comes from KEYCODE (JavaScript keyCode). The final Enter / Next is not logged. A LETTER can be a
+literal newline (the row spans two lines; the loader re-joins it) or a literal tab (10 fields; the sentence is dropped
+as malformed). TEST_SECTION_ID is unique per presentation, so the sentence id is a hash of SENTENCE.
+
+**Loader** (`load_aalto`, src/keyauth/data/aalto.py): each sentence goes through events.pair_events and
+features.extract_features, like live capture (modifiers dropped, ordered by press time, hold <= 2 s, dd <= 5 s).
+Defaults: drop sentences with any editing key (Backspace, Delete, arrows, Home/End, ...), like the login page rejects
+corrected attempts; uncorrected typos are kept; 10 to 128 keystrokes; at least 5 clean sentences per participant.
+Key codes only with `with_keys=True`.
+
+**Statistics on the 10,000-participant subset** (`python -m keyauth.data.aalto data/aalto [options]`):
+
+| | default (drop corrected, >= 5 sentences) | drop corrected, >= 10 sentences | keep corrections, >= 10 sentences |
+|---|---|---|---|
+| participants kept | 5,742 (57.4%) | 1,087 (10.9%) | 9,919 (99.2%) |
+| sentences kept, of 150,000 | 43,439 (29.0%) | 12,241 (8.2%) | 145,686 (97.1%) |
+| dropped: correction | 95,217 (63.5%) | 95,217 (63.5%) | 0 |
+| dropped: timing outlier | 879 (0.6%) | 879 (0.6%) | 3,765 (2.5%) |
+| dropped: too few sentences | 10,442 (7.0%) | 41,640 (27.8%) | 458 (0.3%) |
+| dropped: malformed / unpaired / length | 13 / 10 / 0 | 13 / 10 / 0 | 13 / 30 / 48 |
+| sentences per participant, mean (median) | 7.57 (7), range 5 to 15 | 11.26 (11), range 10 to 15 | 14.69 (15) |
+| keystrokes per sentence, mean (median) | 37.3 (35), range 13 to 79 | 38.9 (37), range 14 to 75 | 46.6 (45), range 13 to 128 |
+| distinct sentences | 1,525 | 1,522 | 1,525 |
+
+Under the default, each sentence is typed by a median of 27 kept participants (5 to 61), and 24% of transitions have a
+negative ud (rollover). Kept participants' keyboards (metadata): 3,056 laptop, 2,557 full, 79 small physical,
+50 on-screen.
+
+Caveat: dropping corrected sentences keeps the more accurate typists (participants with many corrections fall
+under the 5-sentence minimum), so the kept population is not a random sample of the 10,000.

@@ -48,3 +48,29 @@ def split_sessions(data: KeystrokeData, enroll_sessions: int) -> tuple[Keystroke
         first = data.sessions[rows].min()
         early |= rows & (data.sessions < first + enroll_sessions)
     return data.subset(early), data.subset(~early)
+
+
+def split_sentences(
+    data: KeystrokeData,
+    holdout_frac: float = 0.3,
+    seed: int = 0,
+) -> tuple[KeystrokeData, KeystrokeData]:
+    """(seen, unseen): hold out a random fraction of sentence ids, for "unseen sentence" evaluation.
+
+    Every attempt of a held-out sentence goes to `unseen`, whoever typed it. Combine with
+    split_users to test on unseen people typing unseen sentences, e.g. train on
+    train_users & seen, evaluate on test_users & unseen.
+    """
+    sentences = np.array([], dtype=np.int64)
+    if data.sentence_ids is not None:
+        sentences = np.unique(data.sentence_ids)
+    n_out = int(round(holdout_frac * len(sentences)))
+    if data.sentence_ids is None or n_out < 1 or n_out >= len(sentences):
+        raise ValueError(
+            f"cannot hold out {holdout_frac} of {len(sentences)} sentence ids (data needs sentence_ids, "
+            "and both sides must be non-empty)"
+        )
+    rng = np.random.default_rng(seed)
+    rng.shuffle(sentences)
+    unseen = np.isin(data.sentence_ids, sentences[:n_out])
+    return data.subset(~unseen), data.subset(unseen)
