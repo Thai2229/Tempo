@@ -21,6 +21,7 @@ class KeystrokeDataset(Dataset):
     """Items are (x, length, label):
     x      float32 (L, 3) normalized timings, zero padded
     length int64 number of keystrokes
+    (keyCodes are in .keys, not in items, so key-free callers are unchanged)
     label  int64 user index (from label_map)
     """
 
@@ -34,6 +35,10 @@ class KeystrokeDataset(Dataset):
         self.x = torch.from_numpy(normalizer(data))
         self.lengths = torch.from_numpy(data.lengths.astype(np.int64))
         self.labels = torch.tensor([label_map[u] for u in data.user_ids], dtype=torch.int64)
+        # keyCodes (N, L) for key-identity models; None when the data has none
+        self.keys: torch.Tensor | None = None
+        if data.key_codes is not None:
+            self.keys = torch.from_numpy(data.key_codes.astype(np.int64))
 
     def __len__(self) -> int:
         return self.x.shape[0]

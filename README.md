@@ -58,6 +58,9 @@ Honest reading:
 - **Splits vary a lot.** With only 8 test users per split, treat any single number as ± 5 points.
 - **Per-user thresholds trade one error for another.** On split seed 0 they cut the false-reject rate from 36.8 %
   to 31.8 % but raise false accepts from 13.9 % to 15.0 %. They are on by default, to reject fewer real users.
+- **Pretraining on 7,748 other typists did not help (C11).** An encoder trained on the Aalto typing-test data and
+  fine-tuned on CMU was picked on val but tied on test (21.48 % against 21.23 % on the same runs), so it is not
+  shipped. Without CMU fine-tuning it reaches 33 %.
 - **Short enrollment costs accuracy.** 10 enrollment attempts is far fewer than the 200 that Killourhy & Maxion
   (2009) used.
 
