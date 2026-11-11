@@ -21,15 +21,20 @@ same code as live capture: rows -> RawEvent down/up pairs -> events.pair_events
 (drops modifiers, orders by press time, rejects release-before-press) ->
 features.extract_features (rejects hold > MAX_HOLD_S or dd > MAX_LATENCY_S).
 
-Decisions (counts of every drop reason go into `report`):
-- corrections="drop" (default): a sentence with any editing key (Backspace,
-  Delete, arrows, Home/End, ...) is dropped, like the CMU benchmark and the web
-  page, which reject corrected attempts. "keep" keeps it, with the editing keys
-  as ordinary keystrokes. Uncorrected typos are kept either way: the timing is
-  still real typing, and the sentence id is the presented sentence.
+Decisions (owner, C10; counts of every drop reason go into `report`):
+- corrections="keep" (default): people make mistakes typing passwords, so a
+  sentence with editing keys (Backspace, Delete, arrows, Home/End, ...) is kept,
+  with the editing keys as ordinary keystrokes, and flagged in has_correction.
+  "drop" drops it, like the CMU benchmark. Uncorrected typos are kept either
+  way: the timing is still real typing, and the sentence id is the presented
+  sentence.
+- keyboards=("laptop", "full") (default): only participants whose KEYBOARD_TYPE
+  in metadata_participants.txt is one of these are read (the others are
+  "small" and "on-screen"); None reads everyone and needs no metadata.
+  Participants missing from the metadata are dropped.
 - Unpaired or malformed rows, timing outliers, or fewer than min_keys / more
   than max_keys keystrokes after dropping modifiers: the sentence is dropped.
-- Participants with fewer than min_sentences clean sentences are dropped.
+- Participants with fewer than min_sentences kept sentences are dropped.
 - sentence_ids are a 63-bit hash of the presented sentence; the text itself is
   not kept. key_codes (keyCode per keystroke) are only kept if with_keys=True.
 - sessions are -1: all 15 sentences come from one sitting.
@@ -61,6 +66,8 @@ AALTO_COLUMNS = (
     "KEYCODE",
 )
 PARTICIPANT_SUFFIX = "_keystrokes.txt"
+METADATA_FILE = "metadata_participants.txt"
+KEYBOARD_TYPES = ("laptop", "full", "small", "on-screen")
 
 # JavaScript keyCodes of modifiers, mapped to the names in config.MODIFIER_KEYS so pair_events drops them.
 MODIFIER_KEYCODES = {16: "Shift", 17: "Control", 18: "Alt", 20: "CapsLock", 91: "Meta", 92: "Meta", 93: "Meta", 225: "AltGraph"}
@@ -116,9 +123,28 @@ def read_participant(path: Path) -> list[tuple[str, list[list[str]] | None]]:
     return list(sections.values())
 
 
+def read_keyboards(path: Path) -> dict[str, str]:
+    """PARTICIPANT_ID -> KEYBOARD_TYPE from metadata_participants.txt (rows with too few fields are skipped).
+
+    Raises ValueError if the file lacks those columns.
+    """
+    with path.open(encoding="utf-8", errors="replace") as f:
+        header = f.readline().rstrip("\r\n").split("\t")
+        if "PARTICIPANT_ID" not in header or "KEYBOARD_TYPE" not in header:
+            raise ValueError(f"{path} needs PARTICIPANT_ID and KEYBOARD_TYPE columns")
+        pid_col = header.index("PARTICIPANT_ID")
+        kb_col = header.index("KEYBOARD_TYPE")
+        keyboards = {}
+        for line in f:
+            fields = line.rstrip("\r\n").split("\t")
+            if len(fields) > max(pid_col, kb_col):
+                keyboards[fields[pid_col]] = fields[kb_col]
+    return keyboards
+
+
 def sentence_timings(
     rows: list[list[str]],
-    corrections: str = "drop",
+    corrections: str = "keep",
     min_keys: int = 10,
     max_keys: int = MAX_KEYS,
 ) -> tuple[np.ndarray | None, list[int], str]:
@@ -155,33 +181,53 @@ def sentence_timings(
 def load_aalto(
     root: str | Path,
     with_keys: bool = False,
-    corrections: str = "drop",
+    corrections: str = "keep",
     min_keys: int = 10,
     max_keys: int = MAX_KEYS,
-    min_sentences: int = 5,
+    min_sentences: int = 10,
     max_participants: int | None = None,
     report: Counter | None = None,
+    keyboards: tuple[str, ...] | None = ("laptop", "full"),
 ) -> KeystrokeData:
     """All participants under root/files (sorted by file name; the first max_participants if given).
 
-    `report`, if given, is filled with counts: participants_seen / _kept, sentences_seen / _kept,
-    keystrokes_kept, and dropped_<reason> for each of DROP_REASONS (in sentences).
+    `report`, if given, is filled with counts: participants_seen / _kept, participants_no_metadata /
+    _other_keyboard (dropped before reading their file), sentences_seen / _kept / _corrected (of the read
+    participants), keystrokes_kept, and dropped_<reason> for each of DROP_REASONS (in sentences).
     """
     root = Path(root)
     paths = sorted((root / "files").glob("*" + PARTICIPANT_SUFFIX))
     if max_participants is not None:
         paths = paths[:max_participants]
-    if corrections not in ("drop", "keep") or min_sentences < 1 or not paths:
+    if (
+        corrections not in ("drop", "keep")
+        or min_sentences < 1
+        or not paths
+        or (
+            keyboards is not None
+            and (not keyboards or not set(keyboards) <= set(KEYBOARD_TYPES) or not (root / METADATA_FILE).is_file())
+        )
+    ):
         raise ValueError(
-            f"need corrections in ('drop', 'keep'), min_sentences >= 1 and participant files in {root / 'files'}"
+            f"need corrections in ('drop', 'keep'), min_sentences >= 1, participant files in {root / 'files'}, "
+            f"and keyboards None or a non-empty subset of {KEYBOARD_TYPES} with {root / METADATA_FILE}"
         )
     if report is None:
         report = Counter()
+    participant_keyboards = None
+    if keyboards is not None:
+        participant_keyboards = read_keyboards(root / METADATA_FILE)
 
-    seqs, users, sentences, codes = [], [], [], []
+    seqs, users, sentences, codes, corrected = [], [], [], [], []
     for path in paths:
         participant = path.name.removesuffix(PARTICIPANT_SUFFIX)
         report["participants_seen"] += 1
+        if participant_keyboards is not None and participant not in participant_keyboards:
+            report["participants_no_metadata"] += 1
+            continue
+        if participant_keyboards is not None and participant_keyboards[participant] not in keyboards:
+            report["participants_other_keyboard"] += 1
+            continue
         kept = []
         for text, rows in read_participant(path):
             report["sentences_seen"] += 1
@@ -192,34 +238,40 @@ def load_aalto(
             if values is None:
                 report[f"dropped_{reason}"] += 1
                 continue
-            kept.append((values, sentence_id(text), keys))
+            kept.append((values, sentence_id(text), keys, any(k in EDIT_KEYCODES for k in keys)))
         if len(kept) < min_sentences:
             report["dropped_few_sentences"] += len(kept)
             continue
         report["participants_kept"] += 1
-        for values, sid, keys in kept:
+        for values, sid, keys, fixed in kept:
             report["sentences_kept"] += 1
+            report["sentences_corrected"] += int(fixed)
             report["keystrokes_kept"] += len(values)
             seqs.append(values)
             users.append(participant)
             sentences.append(sid)
             codes.append(keys)
+            corrected.append(fixed)
 
     if not with_keys:
         codes = None
-    return KeystrokeData.from_arrays(seqs, users, None, sentences, codes)
+    return KeystrokeData.from_arrays(seqs, users, None, sentences, codes, corrected)
 
 
 def main(argv: list[str] | None = None) -> int:
     """Print dataset statistics: python -m keyauth.data.aalto data/aalto"""
     ap = argparse.ArgumentParser(description="Statistics of a downloaded Aalto subset")
     ap.add_argument("root", type=Path)
-    ap.add_argument("--corrections", choices=("drop", "keep"), default="drop")
-    ap.add_argument("--min-sentences", type=int, default=5)
+    ap.add_argument("--corrections", choices=("drop", "keep"), default="keep")
+    ap.add_argument("--min-sentences", type=int, default=10)
+    ap.add_argument("--keyboards", default="laptop,full", help="comma separated KEYBOARD_TYPEs, or 'all'")
     ap.add_argument("--min-keys", type=int, default=10)
     ap.add_argument("--max-participants", type=int, default=None)
     args = ap.parse_args(argv)
 
+    keyboards = None
+    if args.keyboards != "all":
+        keyboards = tuple(args.keyboards.split(","))
     report: Counter = Counter()
     data = load_aalto(
         args.root,
@@ -228,10 +280,13 @@ def main(argv: list[str] | None = None) -> int:
         min_sentences=args.min_sentences,
         max_participants=args.max_participants,
         report=report,
+        keyboards=keyboards,
     )
     per_user = np.array([int(np.sum(data.user_ids == u)) for u in data.users])
     print(f"participants: {report['participants_kept']} kept of {report['participants_seen']}")
-    print(f"sentences: {report['sentences_kept']} kept of {report['sentences_seen']}")
+    print(f"  dropped no metadata: {report['participants_no_metadata']}, other keyboard: {report['participants_other_keyboard']}")
+    print(f"sentences: {report['sentences_kept']} kept of {report['sentences_seen']} read")
+    print(f"  kept with a correction: {report['sentences_corrected']} ({100.0 * report['sentences_corrected'] / max(report['sentences_kept'], 1):.1f}%)")
     for reason in DROP_REASONS:
         n = report[f"dropped_{reason}"]
         print(f"  dropped {reason}: {n} ({100.0 * n / max(report['sentences_seen'], 1):.1f}%)")
@@ -239,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"sentences per participant: mean {per_user.mean():.2f}, median {np.median(per_user):.0f}, min {per_user.min()}, max {per_user.max()}")
         print(f"keystrokes per sentence: mean {data.lengths.mean():.1f}, median {np.median(data.lengths):.0f}, min {data.lengths.min()}, max {data.lengths.max()}")
         print(f"distinct sentences: {len(np.unique(data.sentence_ids))}")
+        repeats = Counter(zip(data.user_ids.tolist(), data.sentence_ids.tolist()))
+        print(f"most times one participant typed one sentence: {max(repeats.values())}")
     return 0
 
 

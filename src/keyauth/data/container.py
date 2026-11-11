@@ -23,9 +23,11 @@ class KeystrokeData:
     user_ids: np.ndarray  # (N,) str
     sessions: np.ndarray  # (N,) int64, capture session (-1 = unknown)
     # Optional, for free-text data (Aalto): which sentence was typed (an id or hash, never the text),
-    # and the key identity of each keystroke (e.g. JavaScript keyCode), 0 past lengths[i].
+    # the key identity of each keystroke (e.g. JavaScript keyCode), 0 past lengths[i],
+    # and whether the attempt contains a correction (Backspace, arrows, ...).
     sentence_ids: np.ndarray | None = None  # (N,) int64
     key_codes: np.ndarray | None = None  # (N, L) int64
+    has_correction: np.ndarray | None = None  # (N,) bool
 
     def __post_init__(self):
         n = self.values.shape[0]
@@ -35,10 +37,12 @@ class KeystrokeData:
             raise ValueError("lengths, user_ids and sessions must all have shape (N,)")
         if n > 0 and (self.lengths.min() < 2 or self.lengths.max() > self.values.shape[1]):
             raise ValueError("every attempt needs 2..L keystrokes")
-        if (self.sentence_ids is not None and self.sentence_ids.shape != (n,)) or (
-            self.key_codes is not None and self.key_codes.shape != self.values.shape[:2]
+        if (
+            (self.sentence_ids is not None and self.sentence_ids.shape != (n,))
+            or (self.key_codes is not None and self.key_codes.shape != self.values.shape[:2])
+            or (self.has_correction is not None and self.has_correction.shape != (n,))
         ):
-            raise ValueError("sentence_ids must have shape (N,) and key_codes shape (N, L)")
+            raise ValueError("sentence_ids and has_correction must have shape (N,) and key_codes shape (N, L)")
 
     def __len__(self) -> int:
         return self.values.shape[0]
@@ -59,6 +63,9 @@ class KeystrokeData:
         key_codes = None
         if self.key_codes is not None:
             key_codes = self.key_codes[index]
+        has_correction = None
+        if self.has_correction is not None:
+            has_correction = self.has_correction[index]
         return KeystrokeData(
             values=self.values[index],
             lengths=self.lengths[index],
@@ -66,6 +73,7 @@ class KeystrokeData:
             sessions=self.sessions[index],
             sentence_ids=sentence_ids,
             key_codes=key_codes,
+            has_correction=has_correction,
         )
 
     def for_users(self, users: Sequence[str]) -> "KeystrokeData":
@@ -86,6 +94,7 @@ class KeystrokeData:
         sessions: Sequence[int] | None = None,
         sentence_ids: Sequence[int] | None = None,
         key_codes: Sequence[Sequence[int]] | None = None,
+        has_correction: Sequence[bool] | None = None,
     ) -> "KeystrokeData":
         """Build from a list of (n_i, 3) timing arrays of possibly different lengths.
 
@@ -95,8 +104,9 @@ class KeystrokeData:
             len(sequences) != len(user_ids)
             or (sentence_ids is not None and len(sentence_ids) != len(sequences))
             or (key_codes is not None and [len(k) for k in key_codes] != [len(s) for s in sequences])
+            or (has_correction is not None and len(has_correction) != len(sequences))
         ):
-            raise ValueError("sequences, user_ids, sentence_ids and key_codes length mismatch")
+            raise ValueError("sequences, user_ids, sentence_ids, key_codes and has_correction length mismatch")
         if sessions is None:
             sessions = [-1] * len(sequences)
         lengths = np.array([len(s) for s in sequences], dtype=np.int64)
@@ -114,6 +124,9 @@ class KeystrokeData:
             code_array = np.zeros((len(sequences), max_len), dtype=np.int64)
             for i, k in enumerate(key_codes):
                 code_array[i, : len(k)] = np.asarray(k, dtype=np.int64)
+        correction_array = None
+        if has_correction is not None:
+            correction_array = np.asarray(has_correction, dtype=bool).reshape(len(sequences))
         return cls(
             values=values,
             lengths=lengths,
@@ -121,6 +134,7 @@ class KeystrokeData:
             sessions=np.asarray(sessions, dtype=np.int64),
             sentence_ids=sentence_array,
             key_codes=code_array,
+            has_correction=correction_array,
         )
 
     @classmethod
@@ -135,7 +149,7 @@ class KeystrokeData:
     @staticmethod
     def concat(parts: Sequence["KeystrokeData"]) -> "KeystrokeData":
         """Optional fields are kept only if every part has them."""
-        seqs, users, sessions, sentence_ids, key_codes = [], [], [], [], []
+        seqs, users, sessions, sentence_ids, key_codes, has_correction = [], [], [], [], [], []
         for p in parts:
             for i in range(len(p)):
                 seqs.append(p.values[i, : p.lengths[i]])
@@ -145,8 +159,12 @@ class KeystrokeData:
             sessions.extend(p.sessions.tolist())
             if p.sentence_ids is not None:
                 sentence_ids.extend(p.sentence_ids.tolist())
+            if p.has_correction is not None:
+                has_correction.extend(p.has_correction.tolist())
         if len(sentence_ids) != len(seqs):
             sentence_ids = None
         if len(key_codes) != len(seqs):
             key_codes = None
-        return KeystrokeData.from_arrays(seqs, users, sessions, sentence_ids, key_codes)
+        if len(has_correction) != len(seqs):
+            has_correction = None
+        return KeystrokeData.from_arrays(seqs, users, sessions, sentence_ids, key_codes, has_correction)

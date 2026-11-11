@@ -50,10 +50,12 @@ Goal: a model that works on any password (C10-C11), then a Turnstile-style servi
 Split agreed with the owner: Claude builds C12-C13 and the C10 loader/training scripts; the owner leads the C11
 experiments and their interpretation.
 
-Where we stopped: C10 done (data script, loader, sentence split; stats in docs/RESULTS.md). userinterfaces.aalto.fi is
-now allowed in the "projects" cloud environment. Next is C11, led by the owner. Open questions for C11 are in the C10 PR
-(correction policy, min sentences per participant, on-screen keyboards, CMU's trailing Enter). License: non-commercial
-only, so C12-C13 stay a portfolio demo unless the authors grant permission.
+Where we stopped: C10 done (data script, loader, sentence split; stats in docs/RESULTS.md), including the owner's
+decisions on its open questions: keep corrected sentences (flagged per attempt), >= 10 sentences per participant,
+laptop/full keyboards only, CMU's final Enter dropped. Aalto has each sentence once per participant, so the login-style
+test uses CMU. The owner asked Claude to run C11 with the goal of lowering real test error; every choice is made on
+val users only and test is scored once. License: non-commercial only, so C12-C13 stay a portfolio demo unless the
+authors grant permission.
 
 ## C10: Phrase-independent data (owner: ai-lead)
 - [x] Owner reads the Aalto "136M Keystrokes" dataset license/terms (Dhakal et al., CHI 2018) before any download
@@ -63,11 +65,15 @@ only, so C12-C13 stay a portfolio demo unless the authors grant permission.
 - [x] Keep key identity optional in the loader so C11 can measure what the page's anonymization costs
 
 ## C11: Train and evaluate on unseen phrases (owner: the project owner leads; ai-lead supports)
-- [ ] Contrastive training where "same class" = same person across different sentences
-- [ ] Report val AND test EER, mean +/- std over 3+ seeds, for: unseen people on unseen sentences; login-style
-      (enroll 10 attempts of one phrase, verify more of it); cross-dataset (Aalto-trained model tested on CMU, no CMU training)
+- [ ] Data: Aalto defaults from C10 (corrections kept, >=10 sentences, laptop/full keyboards); user-disjoint
+      train/val/test; held-out sentences for val/test
+- [ ] Every choice (corrections kept vs dropped, key identity, model size, epochs, temperature) made on VAL users only;
+      TEST scored once at the end
+- [ ] Report val AND test EER, mean +/- std over 3+ seeds: (a) Aalto, unseen people on unseen sentences, clean vs
+      corrected attempts separately; (b) CMU login test with the Aalto-trained model and no CMU training (enroll 10
+      attempts of .tie5Roanl, final Enter dropped), against the current CMU encoder's 21.50% and scaled Manhattan's 22.14%
 - [ ] With vs without key identity (the privacy cost of anonymized events)
-- [ ] Compare with the current CMU-only encoder in docs/RESULTS.md; ship whichever wins on test EER
+- [ ] Ship whichever wins on the CMU login test EER; engine keeps working via the Embedder protocol
 
 ## C12: Multi-site service (owner: backend-developer)
 - [ ] Sites table: site_id (= app_id), public site key, hashed secret, allowed origins; admin CLI to create sites
