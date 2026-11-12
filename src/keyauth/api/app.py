@@ -299,7 +299,15 @@ def create_app(engine: KeyAuthEngine | None = None, settings: Settings | None = 
 
         @app.get("/", include_in_schema=False)
         def index():
+            if settings.landing:
+                return static_response("landing.html")
             return static_response("index.html")
+
+        if settings.landing:
+
+            @app.get("/demo", include_in_schema=False)
+            def demo():
+                return static_response("index.html")
 
         @app.get("/favicon.ico", include_in_schema=False)
         def favicon():
