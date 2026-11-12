@@ -44,3 +44,46 @@ level with scaled Manhattan (22.14 +/- 5.98%). Details and caveats in docs/RESUL
 - [x] GitHub Actions CI running pytest
 - [x] Docker or one-click deploy option for the demo
   - Dockerfile; CI's `docker` job builds the image and smoke-tests it on every PR (the cloud session itself could not build it: download.pytorch.org blocked).
+
+## Next phase (paused 2026-11-10; resume here)
+Goal: a model that works on any password (C10-C11), then a Turnstile-style service other websites call (C12-C13).
+Split agreed with the owner: Claude builds C12-C13 and the C10 loader/training scripts; the owner leads the C11
+experiments and their interpretation.
+
+Where we stopped: C10 done (data script, loader, sentence split; stats in docs/RESULTS.md), including the owner's
+decisions on its open questions: keep corrected sentences (flagged per attempt), >= 10 sentences per participant,
+laptop/full keyboards only, CMU's final Enter dropped. Aalto has each sentence once per participant, so the login-style
+test uses CMU. The owner asked Claude to run C11 with the goal of lowering real test error; every choice is made on
+val users only and test is scored once. License: non-commercial only, so C12-C13 stay a portfolio demo unless the
+authors grant permission.
+
+## C10: Phrase-independent data (owner: ai-lead)
+- [x] Owner reads the Aalto "136M Keystrokes" dataset license/terms (Dhakal et al., CHI 2018) before any download
+  - "free to use for non-commercial use in your own research or projects with attribution"; nothing on redistribution, so the data is never committed or re-hosted.
+- [x] scripts/get_aalto.py: download a subset (~10k participants) into data/, validated, fail clearly if unreachable
+- [x] Loader: per-participant press/release times -> (hold, dd, ud) timings, user-disjoint splits; never commit the data
+- [x] Keep key identity optional in the loader so C11 can measure what the page's anonymization costs
+
+## C11: Train and evaluate on unseen phrases (owner: the project owner leads; ai-lead supports)
+- [ ] Data: Aalto defaults from C10 (corrections kept, >=10 sentences, laptop/full keyboards); user-disjoint
+      train/val/test; held-out sentences for val/test
+- [ ] Every choice (corrections kept vs dropped, key identity, model size, epochs, temperature) made on VAL users only;
+      TEST scored once at the end
+- [ ] Report val AND test EER, mean +/- std over 3+ seeds: (a) Aalto, unseen people on unseen sentences, clean vs
+      corrected attempts separately; (b) CMU login test with the Aalto-trained model and no CMU training (enroll 10
+      attempts of .tie5Roanl, final Enter dropped), against the current CMU encoder's 21.50% and scaled Manhattan's 22.14%
+- [ ] With vs without key identity (the privacy cost of anonymized events)
+- [ ] Ship whichever wins on the CMU login test EER; engine keeps working via the Embedder protocol
+
+## C12: Multi-site service (owner: backend-developer)
+- [ ] Sites table: site_id (= app_id), public site key, hashed secret, allowed origins; admin CLI to create sites
+- [ ] Signed, single-use, 60 s tokens: the browser never receives "accepted", only a token
+- [ ] POST /v1/siteverify {secret, token} -> {success, user_id, rhythm_match, risk}; customer server decides
+- [ ] Enrollment tickets issued to the customer's server only after it authenticates the user (blocks enrolling a victim)
+- [ ] CORS limited to each site's origins; opaque user ids (no emails)
+- [ ] Failure-path tests: forged / expired / reused token, wrong secret, wrong origin, token for another user
+
+## C13: Embeddable script + demo customer site (owner: frontend-developer, fullstack for wiring)
+- [ ] keyauth.js: capture.js packaged as keyauth.attach(passwordField, {sitekey}), anonymized events, hidden token field
+- [ ] Separate small demo "customer" site with its own users and hashed passwords that integrates keyauth end to end
+- [ ] Browser e2e test of the integration (like C8's)
