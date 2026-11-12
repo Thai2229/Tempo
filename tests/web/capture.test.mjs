@@ -158,3 +158,26 @@ test("user id validation matches the API charset", () => {
     assert.equal(isValidUserId(bad), false, JSON.stringify(bad));
   }
 });
+
+test("phrase null (embedded login) accepts any password of allowed length ending with Enter", () => {
+  const press = (rec, ch, t) => {
+    rec.keyDown(ch, "C" + ch, t, false);
+    rec.keyUp(ch, "C" + ch, t + 40);
+  };
+  const attempt = (text) => {
+    const rec = new Recorder(null);
+    let t = 0;
+    for (const ch of text) {
+      press(rec, ch, t);
+      t += 100;
+    }
+    rec.keyDown("Enter", "Enter", t, false);
+    return rec.keyUp("Enter", "Enter", t + 40);
+  };
+  assert.equal(attempt("my-own-pw").status, "done");
+  assert.equal(attempt("abcd").status, "done");
+  assert.deepEqual(attempt("abc"), { status: "reset", reason: "wrong_password" }); // too short
+  assert.equal(attempt("a".repeat(100)).status, "done");
+  assert.equal(attempt("b".repeat(101)).reason, "wrong_password"); // too long
+  assert.equal(matchesPhrase([], null), false);
+});
