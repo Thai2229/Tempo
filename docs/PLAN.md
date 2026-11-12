@@ -53,7 +53,7 @@ experiments and their interpretation.
 Where we stopped: C10 and C11 done. C11 found that Aalto pretraining does not lower the CMU login test EER (B2
 21.48% vs 21.23% for the CMU-only recipe on the same runs; Aalto-only 32.98%), so the shipped CMU encoder stays.
 On Aalto itself the model reaches 5.39% test EER on unseen people and sentences; key identity would cut that to
-3.01%, which is the privacy cost of anonymized events. Next: C13 (C12 done: see docs/SERVICE.md). License: non-commercial only, so C12-C13 stay a
+3.01%, which is the privacy cost of anonymized events. C12 (docs/SERVICE.md) and C13 (keyauth.js, demo_site/) done: the Turnstile-style demo works end to end. License: non-commercial only, so C12-C13 stay a
 portfolio demo unless the authors grant permission.
 
 ## C10: Phrase-independent data (owner: ai-lead)
@@ -88,6 +88,6 @@ portfolio demo unless the authors grant permission.
 - [x] Failure-path tests: forged / expired / reused token, wrong secret, wrong origin, token for another user
 
 ## C13: Embeddable script + demo customer site (owner: frontend-developer, fullstack for wiring)
-- [ ] keyauth.js: capture.js packaged as keyauth.attach(passwordField, {sitekey}), anonymized events, hidden token field
-- [ ] Separate small demo "customer" site with its own users and hashed passwords that integrates keyauth end to end
-- [ ] Browser e2e test of the integration (like C8's)
+- [x] keyauth.js: capture.js packaged as keyauth.attach(passwordField, {sitekey}), anonymized events, hidden token field
+- [x] Separate small demo "customer" site with its own users and hashed passwords that integrates keyauth end to end
+- [x] Browser e2e test of the integration (like C8's)
