@@ -695,6 +695,11 @@ B2_LRS = (1e-4, 3e-4, 1e-3)
 B2_EPOCHS = (5, 15, 30)
 # Decisions made from the val-only stages (see docs/RESULTS.md, C11); `final` and `b2` use them.
 C11_SELECTED: dict = {"aalto": "t0.05_e30", "normalizer": "cmu", "b2_lr": 1e-3, "b2_epochs": 15}
+# C11b (B2e: fine-tune with CMU's Return kept). Chosen on CMU val only (`c11 b2 --keep-enter` grid, then the
+# normalizer at the chosen cell); `c11 final_b2e` reads test users once with these. Val, 3 replicates: B2e 19.84,
+# B2 18.72, B3 19.10, so B2e is not selected for shipping; its test is scored only to report the comparison.
+C11B_SELECTED: dict = {"aalto": "t0.05_e30", "normalizer": "cmu", "b2_lr": 1e-3, "b2_epochs": 30}
+T_CRIT_95_DF4 = 2.776  # two-sided 95% t quantile, 4 degrees of freedom (5 paired splits)
 
 
 def aalto_config(variant: str) -> dict:
@@ -870,42 +875,61 @@ def cmd_c11_b1(args: argparse.Namespace) -> None:
     print(c11_write("b1.json", run_jobs(b1_job, jobs, args.workers)))
 
 
-def b2_ckpt(variant: str, lr: float, epochs: int, split: int, replicate: int) -> Path:
-    return C11_DIR / "b2" / f"{variant}_lr{lr:g}_e{epochs}_split{split}_r{replicate}.pt"
+def b2_ckpt(variant: str, lr: float, epochs: int, split: int, replicate: int, final_enter: bool = False,
+            normalizer: str = "cmu") -> Path:
+    """B2 checkpoints in c11/b2/; B2e (Return kept, C11b) in c11/b2e/, with the normalizer in the name if not CMU's."""
+    name = f"{variant}_lr{lr:g}_e{epochs}_split{split}_r{replicate}.pt"
+    if not final_enter:
+        return C11_DIR / "b2" / name
+    if normalizer != "cmu":
+        name = f"{variant}_norm{normalizer}_lr{lr:g}_e{epochs}_split{split}_r{replicate}.pt"
+    return C11_DIR / "b2e" / name
 
 
 def b2_job(job: dict) -> dict:
-    """Fine-tune the Aalto model of seed `replicate` on one split's CMU train users (Return dropped)."""
+    """Fine-tune the Aalto model of seed `replicate` on one split's CMU train users: Return dropped (B2), or kept
+    if job["final_enter"] (B2e, C11b; the Aalto model never saw an Enter, the fine-tuned one expects it)."""
     torch.set_num_threads(job.get("threads", 1))
     t0 = time.time()
+    final_enter = bool(job.get("final_enter", False))
     init, init_normalizer, _ = load_checkpoint(aalto_ckpt(job["variant"], job["replicate"]))
-    train_data, val_data, _ = split_users(cmu_data(final_enter=False), seed=job["split"])
+    train_data, val_data, _ = split_users(cmu_data(final_enter=final_enter), seed=job["split"])
     normalizer = cmu_normalizer(job["normalizer"], init_normalizer, train_data)
     cfg = TrainConfig(epochs=job["epochs"], lr=job["lr"], n_enroll=N_ENROLL, seed=job["split"] + 100 * job["replicate"])
     model, normalizer, history = train(train_data, val_data, cfg, init=init, normalizer=normalizer, log=lambda s: None)
-    path = b2_ckpt(job["variant"], job["lr"], job["epochs"], job["split"], job["replicate"])
-    save_checkpoint(path, model, normalizer, history[-1]["eer_threshold"], {}, final_enter=False)
+    path = b2_ckpt(job["variant"], job["lr"], job["epochs"], job["split"], job["replicate"], final_enter, job["normalizer"])
+    save_checkpoint(path, model, normalizer, history[-1]["eer_threshold"], {}, final_enter=final_enter)
     out = {k: job[k] for k in ("variant", "lr", "epochs", "split", "replicate", "normalizer")}
+    out["final_enter"] = final_enter
     out.update(cmu_eval(model, normalizer, val_data, None))
     out["seconds"] = time.time() - t0
     return out
 
 
 def cmd_c11_b2(args: argparse.Namespace) -> None:
+    """b2: Return dropped -> b2.json. b2 --keep-enter (C11b, B2e): Return kept -> b2e.json."""
     replicates = [int(r) for r in args.replicates.split(",")]
     grid = [(lr, e) for lr in B2_LRS for e in B2_EPOCHS]
     variant = C11_SELECTED["aalto"]
+    selected = C11_SELECTED
+    out_name = "b2.json"
+    if args.keep_enter:
+        selected = C11B_SELECTED
+        out_name = "b2e.json"
+    normalizer = selected["normalizer"]
     if args.b2_base is not None:
         variant = args.b2_base
+    if args.normalizer is not None:
+        normalizer = args.normalizer
     if args.selected_only:
-        grid = [(C11_SELECTED["b2_lr"], C11_SELECTED["b2_epochs"])]
+        grid = [(selected["b2_lr"], selected["b2_epochs"])]
     jobs = [
-        {"variant": variant, "normalizer": C11_SELECTED["normalizer"], "lr": lr, "epochs": e,
-         "split": s, "replicate": r}
+        {"variant": variant, "normalizer": normalizer, "lr": lr, "epochs": e,
+         "split": s, "replicate": r, "final_enter": args.keep_enter}
         for lr, e in grid for s in FINAL_SEEDS for r in replicates
     ]
     rows = run_jobs(b2_job, jobs, args.workers)
-    print(c11_merge("b2.json", rows, lambda r: (r["variant"], r["lr"], r["epochs"], r["split"], r["replicate"])))
+    print(c11_merge(out_name, rows, lambda r: (r["variant"], r["normalizer"], r["lr"], r["epochs"], r["split"], r["replicate"])))
 
 
 def b3_ckpt(split: int, replicate: int) -> Path:
@@ -975,6 +999,19 @@ def cmd_c11_final(args: argparse.Namespace) -> None:
         cmu = list(pool.map(cmu_ckpt_job, b2_jobs + b3_jobs))
     payload = {"selected": C11_SELECTED, "aalto": aalto, "b1": b1, "b2": cmu[: len(b2_jobs)], "b3": cmu[len(b2_jobs) :]}
     print(c11_write("final.json", payload))
+
+
+def cmd_c11_final_b2e(args: argparse.Namespace) -> None:
+    """C11b: reads TEST users for B2e only (B2 / B3 test numbers come from final.json). Run once, after
+    C11B_SELECTED is frozen."""
+    sel = C11B_SELECTED
+    jobs = [
+        {"checkpoint": str(b2_ckpt(sel["aalto"], sel["b2_lr"], sel["b2_epochs"], s, r, True, sel["normalizer"])),
+         "variant": "b2e", "split": s, "replicate": r}
+        for s in FINAL_SEEDS for r in CMU_REPLICATES
+    ]
+    rows = run_jobs(cmu_ckpt_job, jobs, args.workers)
+    print(c11_write("final_b2e.json", {"selected": sel, "b2e": rows}))
 
 
 def ms(values: list[float]) -> str:
@@ -1096,10 +1133,91 @@ def print_c11_final() -> None:
           f"{t['all']['n_impostor']} impostor comparisons (clean {t['clean']['n_genuine']} / corrected {t['corrected']['n_genuine']} genuine).")
 
 
+def paired_diffs(a: list[dict], b: list[dict], metric: Callable[[dict], float]) -> list[float]:
+    """Per-split differences a - b of the replicate means (same splits, so paired)."""
+    return [x - y for x, y in zip(split_means(a, metric), split_means(b, metric))]
+
+
+def print_paired(name: str, diffs: list[float]) -> None:
+    """Paired split differences in points, with the 95% t interval half-width (4 df)."""
+    mean, std = mean_std(diffs)
+    half = T_CRIT_95_DF4 * std / np.sqrt(len(diffs))
+    wins = sum(d < 0 for d in diffs)
+    print(f"| {name} | {' '.join(f'{d * 100:+.2f}' for d in diffs)} | {mean * 100:+.2f} | {std * 100:.2f} "
+          f"| +/- {half * 100:.2f} | {wins}/{len(diffs)} |")
+
+
+def print_c11b() -> None:
+    b2e = c11_read("b2e.json")
+    b2 = c11_read("b2.json")
+    sel = C11B_SELECTED
+    print("\n### C11b B2e (Return kept) vs B2 (Return dropped), fine-tuning grid, CMU VAL (Aalto t0.05_e30 seed 0, "
+          "replicate 0, CMU normalizer, split seeds 0-4; EER %)\n")
+    print("| lr | epochs | B2e val EER (Return kept) | B2 val EER (Return dropped) | B2e - B2 per split (points) | mean |")
+    print("|---|---|---|---|---|---|")
+    for lr in B2_LRS:
+        for e in B2_EPOCHS:
+            def cell(rows: list[dict]) -> list[dict]:
+                return [r for r in rows if r["variant"] == sel["aalto"] and r["normalizer"] == "cmu"
+                        and r["lr"] == lr and r["epochs"] == e and r["replicate"] == 0]
+            kept, dropped = cell(b2e), cell(b2)
+            if not kept or len(dropped) != len(kept):
+                continue
+            d = paired_diffs(kept, dropped, lambda r: r["val"]["eer"])
+            print(f"| {lr:g} | {e} | {ms(split_means(kept, lambda r: r['val']['eer']))} "
+                  f"| {ms(split_means(dropped, lambda r: r['val']['eer']))} | {' '.join(f'{x * 100:+.2f}' for x in d)} "
+                  f"| {np.mean(d) * 100:+.2f} |")
+    print("\n**B2e normalizer and replicates at the chosen cell (CMU VAL, %)**\n")
+    print("| normalizer | lr | epochs | replicates | val EER (mean +/- std across splits) |")
+    print("|---|---|---|---|---|")
+    for (n, lr, e), g in sorted(group_by(b2e, lambda r: (r["normalizer"], r["lr"], r["epochs"])).items()):
+        if lr == sel["b2_lr"] and e == sel["b2_epochs"]:
+            for reps in ([0], [0, 1, 2]):
+                rows = [r for r in g if r["replicate"] in reps]
+                if len(rows) == len(reps) * len(FINAL_SEEDS):
+                    print(f"| {n} | {lr:g} | {e} | {reps} | {ms(split_means(rows, lambda r: r['val']['eer']))} |")
+    if not (C11_DIR / "final_b2e.json").exists():
+        return
+    final = c11_read("final.json")
+    b2e_test = c11_read("final_b2e.json")["b2e"]
+    variants = (
+        ("B3: CMU-only recipe (Return kept; C11)", final["b3"]),
+        ("B2: Aalto t0.05_e30 + CMU fine-tune, Return dropped (C11)", final["b2"]),
+        (f"B2e: Aalto t0.05_e30 + CMU fine-tune, Return kept (lr {sel['b2_lr']:g}, {sel['b2_epochs']} ep, "
+         f"{sel['normalizer']} normalizer)", b2e_test),
+    )
+    print("\n### C11b final: CMU login test, 10 enrollment attempts, split seeds 0-4 (mean +/- std across the 5 splits "
+          "of the 3-replicate means, %; FAR / FRR at each split's val threshold)\n")
+    print("| variant | runs | val EER | test EER | test FAR | test FRR | test EER std across training seeds | test EER, replicate 0 |")
+    print("|---|---|---|---|---|---|---|---|")
+    for name, rows in variants:
+        r0 = [r for r in rows if r["replicate"] == 0]
+        print(
+            f"| {name} | {len(rows)} | {ms(split_means(rows, lambda r: r['val']['eer']))} "
+            f"| {ms(split_means(rows, lambda r: r['test']['eer']))} | {ms(split_means(rows, lambda r: r['test']['far']))} "
+            f"| {ms(split_means(rows, lambda r: r['test']['frr']))} "
+            f"| {mean_std(replicate_means(rows, lambda r: r['test']['eer']))[1] * 100:.2f} "
+            f"| {ms([r['test']['eer'] for r in r0])} |"
+        )
+    print("\n**Per split (test EER %, replicate mean)**\n")
+    print("| variant | " + " | ".join(f"split {s}" for s in FINAL_SEEDS) + " |")
+    print("|---|" + "---|" * len(FINAL_SEEDS))
+    for name, rows in variants:
+        print(f"| {name.split(':')[0]} | " + " | ".join(f"{v * 100:.2f}" for v in split_means(rows, lambda r: r["test"]["eer"])) + " |")
+    print("\n**Paired by split (points; negative = B2e better)**\n")
+    print("| difference | per split | mean | sample std | 95% t half-width | splits B2e better |")
+    print("|---|---|---|---|---|---|")
+    for metric_name, split in (("test", "test"), ("val", "val")):
+        print_paired(f"B2e - B3, {metric_name} EER", paired_diffs(b2e_test, final["b3"], lambda r: r[split]["eer"]))
+        print_paired(f"B2e - B2, {metric_name} EER", paired_diffs(b2e_test, final["b2"], lambda r: r[split]["eer"]))
+
+
 def cmd_c11_table(args: argparse.Namespace) -> None:
     print_c11_val()
     if (C11_DIR / "final.json").exists():
         print_c11_final()
+    if (C11_DIR / "b2e.json").exists():
+        print_c11b()
 
 
 def cmd_c11(args: argparse.Namespace) -> None:
@@ -1109,6 +1227,7 @@ def cmd_c11(args: argparse.Namespace) -> None:
         "b2": cmd_c11_b2,
         "b3": cmd_c11_b3,
         "final": cmd_c11_final,
+        "final_b2e": cmd_c11_final_b2e,
         "table": cmd_c11_table,
     }
     stages[args.stage](args)
@@ -1150,8 +1269,10 @@ def main(argv: list[str] | None = None) -> None:
     peruser.add_argument("--workers", type=int, default=4)
     peruser.set_defaults(run=cmd_peruser)
     sub.add_parser("table").set_defaults(run=cmd_table)
-    c11 = sub.add_parser("c11", help="C11 stages: aalto, b1, b2, b3 (val only), final (test, once), table")
-    c11.add_argument("stage", choices=["aalto", "b1", "b2", "b3", "final", "table"])
+    c11 = sub.add_parser(
+        "c11", help="C11 stages: aalto, b1, b2, b3 (val only), final (test, once), final_b2e (C11b test, once), table"
+    )
+    c11.add_argument("stage", choices=["aalto", "b1", "b2", "b3", "final", "final_b2e", "table"])
     c11.add_argument("--workers", type=int, default=4)
     c11.add_argument("--threads", type=int, default=1, help="torch threads per worker")
     c11.add_argument("--variants", default="base,drop_corrections,keys,t0.05", help="aalto: comma separated AALTO_VARIANTS")
@@ -1159,6 +1280,8 @@ def main(argv: list[str] | None = None) -> None:
     c11.add_argument("--replicates", default="0", help="b2: comma separated replicates (Aalto model seeds)")
     c11.add_argument("--selected-only", action="store_true", help="b2: only C11_SELECTED's lr / epochs")
     c11.add_argument("--b2-base", default=None, help="b2: Aalto variant to fine-tune (default C11_SELECTED's)")
+    c11.add_argument("--keep-enter", action="store_true", help="b2: keep CMU's Return (C11b, B2e) -> c11/b2e.json")
+    c11.add_argument("--normalizer", choices=["aalto", "cmu"], default=None, help="b2: default the selected one")
     c11.set_defaults(run=cmd_c11)
     args = ap.parse_args(argv)
     args.run(args)

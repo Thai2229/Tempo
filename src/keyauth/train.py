@@ -8,7 +8,8 @@
 --data aalto trains on unseen-sentence splits (data.split_phrase_independent) and,
 like the Aalto log, without the final Enter. A checkpoint records that in
 "final_enter"; TorchEmbedder then drops the Enter the web page sends last, and
---init carries it over, so CMU's Return is dropped when fine-tuning such a model.
+--init carries it over, so CMU's Return is dropped when fine-tuning such a model,
+unless --keep-enter (C11b): then the Return is kept and the checkpoint says final_enter=True.
 --init with --epochs 0 only calibrates the threshold on the new data's val users.
 
 Users are split train / val / test (no overlap). The model trains on train
@@ -335,6 +336,10 @@ def main(argv: list[str] | None = None) -> dict:
         "--normalizer", choices=["fit", "init"], default="fit",
         help="with --init: fit statistics on the new train users, or keep the init checkpoint's",
     )
+    ap.add_argument(
+        "--keep-enter", action="store_true",
+        help="with --init: train with the final Enter / Return even if the init model was trained without it (C11b)",
+    )
     ap.add_argument("--out", default="checkpoints/model.pt")
     ap.add_argument("--epochs", type=int, default=TrainConfig.epochs)
     ap.add_argument("--batches-per-epoch", type=int, default=TrainConfig.batches_per_epoch)
@@ -355,9 +360,15 @@ def main(argv: list[str] | None = None) -> dict:
     if args.init is not None:
         init, init_normalizer, init_meta = load_checkpoint(args.init, device=args.device)
         final_enter = init_meta["final_enter"]
-    if (args.data == "aalto" and final_enter) or (args.keys and (args.data != "aalto" or init is not None)):
-        raise ValueError("--data aalto cannot fine-tune a model that expects the final Enter, and --keys needs "
-                         "--data aalto without --init")
+    if args.keep_enter:
+        final_enter = True
+    if (
+        (args.data == "aalto" and final_enter)
+        or (args.keys and (args.data != "aalto" or init is not None))
+        or (args.keep_enter and init is None)
+    ):
+        raise ValueError("--data aalto cannot fine-tune a model that expects the final Enter (or use --keep-enter), "
+                         "--keys needs --data aalto without --init, and --keep-enter needs --init")
 
     n_enroll = args.n_enroll
     if n_enroll is None:

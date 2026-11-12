@@ -60,7 +60,8 @@ Honest reading:
   to 31.8 % but raise false accepts from 13.9 % to 15.0 %. They are on by default, to reject fewer real users.
 - **Pretraining on 7,748 other typists did not help (C11).** An encoder trained on the Aalto typing-test data and
   fine-tuned on CMU was picked on val but tied on test (21.48 % against 21.23 % on the same runs), so it is not
-  shipped. Without CMU fine-tuning it reaches 33 %.
+  shipped. Without CMU fine-tuning it reaches 33 %. Keeping CMU's final Return in the fine-tune (C11b) made val
+  worse (19.84 % against 18.72 %) and test a tie with the current recipe (20.33 % against 21.23 %, inside the noise).
 - **Short enrollment costs accuracy.** 10 enrollment attempts is far fewer than the 200 that Killourhy & Maxion
   (2009) used.
 
@@ -150,7 +151,8 @@ src/keyauth/
   baselines.py             scaled Manhattan and Mahalanobis
   thresholds.py            per-user thresholds
   auth/                    engine, SQLite template store, validation, scorers
-  api/                     FastAPI app
+  api/                     FastAPI app; v1.py + tokens.py: multi-site service (docs/SERVICE.md)
+  sites.py                 site admin CLI (python -m keyauth.sites)
   web/static/              demo page (plain HTML and JS, no build step)
 scripts/                   get_cmu.py, compare_models.py
 docs/                      PLAN.md (roadmap), RESULTS.md (all numbers)
@@ -164,6 +166,11 @@ docs/                      PLAN.md (roadmap), RESULTS.md (all numbers)
 - `DELETE /user` removes a user's template and samples. It is an admin action: it needs `KEYAUTH_ADMIN_TOKEN`, so
   nobody can delete a user and re-enroll as them. In the demo page, "Delete my data" therefore shows "Deleting
   needs an admin token".
+
+## Multi-site service
+
+`KEYAUTH_ENABLE_V1=1` adds a Turnstile-style service under `/v1`: the browser gets only a signed 60 s token and the
+customer's server calls `/v1/siteverify`. See docs/SERVICE.md. It is a demo, not a hardened production service.
 
 ## License
 

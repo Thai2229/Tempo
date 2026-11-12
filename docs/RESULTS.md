@@ -598,7 +598,7 @@ minutes, B2 70 fine-tuning runs in 27 core-minutes (0.1 to 0.7 min each), B1 and
   the deployable variants other than the selected one is within that noise.
 - **Return dropped.** Aalto-trained models do not use the Return keystroke, which the CMU-only encoder uses (its hold,
   and the latency from the last character into Return). That is a handicap for B1 / B2 on CMU, decided in C10. Whether
-  fine-tuning with the Return kept would help was not measured (open question for the owner).
+  fine-tuning with the Return kept would help was not measured here; C11b below measures it (it does not help).
 - **License.** Aalto is free for non-commercial use with attribution. A model trained on it inherits that restriction,
   which is one more reason it is not shipped now.
 - One Aalto data split (seed 0) and one sentence split; Aalto std is over training seeds only.
@@ -620,3 +620,136 @@ python scripts/compare_models.py c11 table
 
 Decisions are in `C11_SELECTED` in scripts/compare_models.py. JSON, logs and checkpoints go to checkpoints/c11/
 (gitignored). The first Aalto command parses data/aalto into checkpoints/c11/aalto.npz.
+
+## C11b: fine-tuning the Aalto model with CMU's Return kept
+
+Real CMU data and the C11 Aalto checkpoints (not retrained). Same protocol as C11: split seeds 0-4, 3 replicates
+each, 10 enrollment attempts, one global threshold at each split's val EER. **Choices were made on CMU val users
+only; B2e's test users were scored once, by `c11 final_b2e`, after `C11B_SELECTED` was frozen.** B2 and B3 test
+numbers are C11's (final.json), not re-scored.
+
+**Question.** B2 (Aalto pretrain + CMU fine-tune) dropped CMU's final Return because the Aalto log has no Enter. B2e
+fine-tunes the same Aalto models (t0.05_e30, seeds 0 / 1 / 2) with the Return kept, so the model also sees the
+latency from `l` into Return and the Return's hold, as the CMU-only recipe (B3) does.
+
+**Verdict: keeping the Return does not help, and nothing is shipped.** On val, B2e is worse than both B2 and B3
+(19.84 against 18.72 and 19.10), and worse than B2 in all 9 cells of the same fine-tuning grid. On test it is 20.33
+against 21.23 for B3, but that 0.91-point gap comes from one split (split 3: -5.58; the other four are 0.0 to +0.5
+points worse). It is far inside the paired noise (95% interval +/- 3.25). The val and test orderings disagree, as
+they did in C11. This is a tie.
+
+### Input handling
+
+No code change was needed for the encoder to accept the Return. Both datasets use the same convention: the last
+keystroke has only a hold, and its dd / ud are masked (`valid_mask`) and zeroed. With the Return kept, CMU attempts
+are 11 keystrokes instead of 10, the 10th key's latency into Return becomes a valid input, and the Return is the
+hold-only last key. The Conv / packed-GRU encoder takes any length. The architecture is unchanged. The B2e
+checkpoints record `final_enter: true`, so `TorchEmbedder` passes the full attempt through.
+
+### Choices made on val
+
+**Fine-tuning grid, the same 3 x 3 as C11 (CMU VAL, Aalto t0.05_e30 seed 0, replicate 0, CMU-train normalizer,
+split seeds 0-4; EER %).** For a paired comparison on the same base model, B2 (Return dropped) was also run on this
+grid. Its C11-selected cell (lr 1e-3, 15 epochs) reproduced C11's 18.48 bit for bit.
+
+| lr | epochs | B2e (Return kept) | B2 (Return dropped) | B2e - B2 per split (points) | mean |
+|---|---|---|---|---|---|
+| 1e-4 | 5 | 26.97 +/- 6.39 | 23.81 +/- 4.75 | +0.32 +2.85 +6.85 +1.45 +4.29 | +3.15 |
+| 1e-4 | 15 | 25.09 +/- 5.70 | 21.36 +/- 3.58 | -0.63 +3.19 +7.92 +1.71 +6.44 | +3.73 |
+| 1e-4 | 30 | 23.78 +/- 5.18 | 20.67 +/- 4.13 | +2.15 +2.50 +7.44 -0.39 +3.87 | +3.11 |
+| 3e-4 | 5 | 25.23 +/- 5.55 | 21.65 +/- 3.68 | -0.03 +3.23 +8.61 +0.35 +5.71 | +3.57 |
+| 3e-4 | 15 | 22.63 +/- 5.55 | 20.00 +/- 3.72 | +0.66 +1.06 +6.00 +1.13 +4.27 | +2.63 |
+| 3e-4 | 30 | 22.65 +/- 4.87 | 19.20 +/- 3.64 | +1.06 +3.26 +4.65 +3.60 +4.68 | +3.45 |
+| 1e-3 | 5 | 22.63 +/- 5.94 | 19.79 +/- 4.63 | +1.37 +2.15 +4.65 +1.74 +4.29 | +2.84 |
+| 1e-3 | 15 | 21.41 +/- 5.60 | 18.48 +/- 4.03 | +1.44 +1.08 +3.52 +3.23 +5.37 | +2.93 |
+| **1e-3** | **30** | **20.23 +/- 5.47** | 18.36 +/- 4.37 | -0.35 +1.77 +1.10 +2.21 +4.65 | +1.87 |
+
+Chosen for B2e: lr 1e-3, 30 epochs (the grid minimum). The gap to B2 shrinks with more training (+3.2 at the
+gentlest cell, +1.9 at the strongest), which is what you would expect if the model has to unlearn the "no Enter"
+input before the Return can help. B2 stays at its C11 choice (lr 1e-3, 15 epochs); it was not re-selected.
+
+**Normalizer at the chosen cell (replicate 0, CMU VAL):** CMU-train statistics 20.23 +/- 5.47 against Aalto
+statistics 21.58 +/- 6.76. Chosen: **CMU train statistics**, the same as B2. No layers were frozen (full fine-tune, as
+in B2), and no other knob was tried, so the selection space (9 grid cells + 2 normalizers) is the same size as B2's.
+
+**Selection among the deployable variants (CMU VAL, 5 splits x 3 replicates, %)**
+
+| variant | val EER | |
+|---|---|---|
+| B3: CMU-only recipe (shipped recipe) | 19.10 +/- 4.67 | |
+| B2: Aalto + CMU fine-tune, Return dropped | **18.72 +/- 3.50** | best on val (C11) |
+| B2e: Aalto + CMU fine-tune, Return kept | 19.84 +/- 4.83 | not selected |
+
+B2e minus B3 on val, per split: +1.56, +0.75, +0.62, -0.92, +1.68 (B2e better on 1 of 5). B2e minus B2: +0.15, +0.74,
++2.07, -0.69, +3.34. The ship rule was fixed before test was scored. Ship only if B2e is selected on val **and** its
+paired test gain over B3 lies outside the 95% t interval of the 5 split differences. The first condition already
+failed.
+
+### Final table (B2e test scored once)
+
+**CMU login test, 10 enrollment attempts, split seeds 0-4: mean +/- std across the 5 splits of the
+replicate-averaged values (%); FAR / FRR at each split's val threshold**
+
+| variant | runs | val EER | test EER | test FAR | test FRR | test EER std across 3 training seeds | test EER, replicate 0 |
+|---|---|---|---|---|---|---|---|
+| B3: CMU-only recipe (Return kept; C11) | 15 | 19.10 +/- 4.67 | 21.23 +/- 9.47 | 20.74 +/- 11.94 | 22.93 +/- 9.98 | 0.58 | 21.50 +/- 9.52 |
+| B2: Aalto + CMU fine-tune, Return dropped (C11) | 15 | 18.72 +/- 3.50 | 21.48 +/- 8.95 | 20.52 +/- 12.35 | 24.72 +/- 9.95 | 0.49 | 21.87 +/- 9.15 |
+| B2e: Aalto + CMU fine-tune, Return kept (lr 1e-3, 30 epochs) | 15 | 19.84 +/- 4.83 | 20.33 +/- 7.31 | 18.14 +/- 8.32 | 24.54 +/- 9.18 | 0.74 | 21.10 +/- 8.16 |
+
+**Per split (test EER %, replicate mean)**
+
+| variant | split 0 | split 1 | split 2 | split 3 | split 4 |
+|---|---|---|---|---|---|
+| B3 | 22.61 | 22.38 | 13.23 | 35.72 | 12.22 |
+| B2 | 26.46 | 22.61 | 13.81 | 33.08 | 11.43 |
+| B2e | 22.97 | 22.40 | 13.35 | 30.14 | 12.76 |
+
+**Paired by split (points; negative = B2e better)**
+
+| difference | per split | mean | sample std | 95% t half-width (4 df) | splits B2e better |
+|---|---|---|---|---|---|
+| B2e - B3, test EER | +0.37 +0.02 +0.12 -5.58 +0.54 | -0.91 | 2.62 | +/- 3.25 | 1/5 |
+| B2e - B2, test EER | -3.48 -0.21 -0.45 -2.94 +1.33 | -1.15 | 2.01 | +/- 2.50 | 4/5 |
+| B2e - B3, val EER | +1.56 +0.75 +0.62 -0.92 +1.68 | +0.74 | 1.04 | +/- 1.30 | 1/5 |
+| B2e - B2, val EER | +0.15 +0.74 +2.07 -0.69 +3.34 | +1.12 | 1.60 | +/- 1.98 | 1/5 |
+
+### Shipped
+
+**Nothing. checkpoints/model.pt is unchanged (the C6 encoder, md5 27dbad32...).** Both conditions failed. B2e was not
+selected on val (19.84, the worst of the three). Its 0.91-point test gain over B3 is inside the paired noise
+(+/- 3.25) and comes from one split. An Aalto-derived model would also inherit Aalto's non-commercial license. If a
+later milestone ships one anyway: `python -m keyauth.train --data cmu --init checkpoints/c11/aalto_t0.05_e30_s0.pt
+--keep-enter --epochs 30 --lr 1e-3` writes it with `"final_enter": true`, so the API embeds the full attempt.
+
+### Caveats
+
+- **Val and test disagree in sign.** On val, keeping the Return looks worse than B2 in every grid cell. On test, B2e
+  is the lowest mean of the three. With 8 users per split, both are within the noise. The val result is the only one
+  that may be used for decisions, and it says no.
+- **Selection bias.** B2e's replicate-0 val number is the minimum of 9 grid cells on the same Aalto model that was
+  then used. B2's grid ran on the round-1 model (t0.05), so B2's own selection was slightly less tied to its final
+  runs. Both val numbers are biased low, B2e's a little more.
+- **The chosen cell is at the grid edge** (highest lr, most epochs). A longer fine-tune might lower B2e further, but
+  the trend points toward the CMU-only recipe, not past it. Extending the grid would add selection bias and was not
+  done.
+- B2 and B3 test numbers are C11's, scored once there. Only B2e's test users were read in C11b.
+
+### Code and compute
+
+- `python -m keyauth.train --init CKPT --keep-enter`: fine-tune with the final Enter / Return kept, even if the init
+  model was trained without it. The checkpoint gets `final_enter: true`. It is refused without `--init`, and with
+  `--data aalto` (no Enter to keep).
+- `scripts/compare_models.py c11 b2 --keep-enter [--normalizer aalto|cmu]` -> c11/b2e.json, checkpoints in
+  c11/b2e/. `c11 final_b2e` scores B2e's test users once -> c11/final_b2e.json. `c11 table` prints the C11b tables.
+- 4-core CPU, 1 torch thread per job, 4 jobs at a time. 105 fine-tuning runs (45 B2e grid, 45 B2 grid of which 5
+  repeat C11 runs, 5 normalizer, 10 replicates) and 15 test scorings: about 13 minutes of wall clock and 41
+  core-minutes. No paid API.
+
+```
+python scripts/compare_models.py c11 b2 --keep-enter --workers 4                        # grid, replicate 0
+python scripts/compare_models.py c11 b2 --workers 4                                     # B2 on the same grid (paired)
+python scripts/compare_models.py c11 b2 --keep-enter --selected-only --normalizer aalto # normalizer check
+python scripts/compare_models.py c11 b2 --keep-enter --selected-only --replicates 1,2
+python scripts/compare_models.py c11 final_b2e --workers 4                              # reads test users; run once
+python scripts/compare_models.py c11 table
+```
