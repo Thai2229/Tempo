@@ -12,6 +12,7 @@ everything, so two apps can both have a user called "alice".
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -43,6 +44,27 @@ CREATE TABLE IF NOT EXISTS samples (
     created_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS samples_user ON samples (app_id, user_id, kind, id);
+CREATE TABLE IF NOT EXISTS sites (
+    site_id      TEXT PRIMARY KEY,         -- used as the engine's app_id
+    name         TEXT NOT NULL,
+    site_key     TEXT NOT NULL UNIQUE,     -- public, embedded in the customer's page
+    secret_salt  TEXT NOT NULL,            -- hex; the secret itself is never stored
+    secret_hash  TEXT NOT NULL,            -- hex sha256(salt + secret)
+    origins      TEXT NOT NULL,            -- JSON list of allowed browser origins
+    created_at   REAL NOT NULL,
+    disabled     INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS used_tokens (
+    jti         TEXT PRIMARY KEY,          -- consumed token ids; rows are purged once the token has expired
+    expires_at  REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS used_tokens_expiry ON used_tokens (expires_at);
+CREATE TABLE IF NOT EXISTS tickets (
+    ticket_hash  TEXT PRIMARY KEY,         -- sha256 of the ticket; the ticket itself is never stored
+    site_id      TEXT NOT NULL,
+    user_id      TEXT NOT NULL,
+    expires_at   REAL NOT NULL
+);
 """
 
 
@@ -57,6 +79,25 @@ class UserRecord:
     failures: int
     locked_until: float
     scorer_state: str | None = None
+
+
+@dataclass
+class SiteRecord:
+    site_id: str
+    name: str
+    site_key: str
+    secret_salt: str
+    secret_hash: str
+    origins: list[str]
+    created_at: float
+    disabled: bool
+
+
+_SITE_COLUMNS = "site_id, name, site_key, secret_salt, secret_hash, origins, created_at, disabled"
+
+
+def _site_from_row(row) -> SiteRecord:
+    return SiteRecord(row[0], row[1], row[2], row[3], row[4], json.loads(row[5]), row[6], bool(row[7]))
 
 
 def _to_blob(v: np.ndarray) -> bytes:
@@ -183,3 +224,78 @@ class TemplateStore:
                 "  SELECT id FROM samples WHERE app_id = ? AND user_id = ? AND kind = ? ORDER BY id DESC LIMIT ?)",
                 (app_id, user_id, kind, app_id, user_id, kind, keep),
             )
+
+    # ---- sites (multi-site service) --------------------------------------
+
+    def create_site(self, site: SiteRecord) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                f"INSERT INTO sites ({_SITE_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (site.site_id, site.name, site.site_key, site.secret_salt, site.secret_hash,
+                 json.dumps(site.origins), site.created_at, int(site.disabled)),
+            )
+
+    def get_site(self, site_id: str) -> SiteRecord | None:
+        with self._lock:
+            row = self._conn.execute(f"SELECT {_SITE_COLUMNS} FROM sites WHERE site_id = ?", (site_id,)).fetchone()
+        if row is None:
+            return None
+        return _site_from_row(row)
+
+    def get_site_by_key(self, site_key: str) -> SiteRecord | None:
+        with self._lock:
+            row = self._conn.execute(f"SELECT {_SITE_COLUMNS} FROM sites WHERE site_key = ?", (site_key,)).fetchone()
+        if row is None:
+            return None
+        return _site_from_row(row)
+
+    def list_sites(self) -> list[SiteRecord]:
+        with self._lock:
+            rows = self._conn.execute(f"SELECT {_SITE_COLUMNS} FROM sites ORDER BY created_at, site_id").fetchall()
+        return [_site_from_row(r) for r in rows]
+
+    def set_site_disabled(self, site_id: str, disabled: bool) -> bool:
+        with self._lock, self._conn:
+            cur = self._conn.execute("UPDATE sites SET disabled = ? WHERE site_id = ?", (int(disabled), site_id))
+        return cur.rowcount > 0
+
+    def set_site_secret(self, site_id: str, salt: str, secret_hash: str) -> bool:
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE sites SET secret_salt = ?, secret_hash = ? WHERE site_id = ?", (salt, secret_hash, site_id)
+            )
+        return cur.rowcount > 0
+
+    # ---- single-use tokens and enrollment tickets -------------------------
+
+    def consume_token(self, jti: str, expires_at: float, now: float) -> bool:
+        """Mark a token id as used. True for the first caller only (primary key; atomic under the lock)."""
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM used_tokens WHERE expires_at < ?", (now,))
+            try:
+                self._conn.execute("INSERT INTO used_tokens (jti, expires_at) VALUES (?, ?)", (jti, expires_at))
+            except sqlite3.IntegrityError:
+                return False
+        return True
+
+    def add_ticket(self, ticket_hash: str, site_id: str, user_id: str, expires_at: float, now: float) -> None:
+        """Store a ticket; it replaces any earlier ticket of the same (site, user)."""
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM tickets WHERE expires_at < ?", (now,))
+            self._conn.execute("DELETE FROM tickets WHERE site_id = ? AND user_id = ?", (site_id, user_id))
+            self._conn.execute(
+                "INSERT INTO tickets (ticket_hash, site_id, user_id, expires_at) VALUES (?, ?, ?, ?)",
+                (ticket_hash, site_id, user_id, expires_at),
+            )
+
+    def ticket_valid(self, ticket_hash: str, site_id: str, user_id: str, now: float) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM tickets WHERE ticket_hash = ? AND site_id = ? AND user_id = ? AND expires_at > ?",
+                (ticket_hash, site_id, user_id, now),
+            ).fetchone()
+        return row is not None
+
+    def delete_ticket(self, ticket_hash: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM tickets WHERE ticket_hash = ?", (ticket_hash,))

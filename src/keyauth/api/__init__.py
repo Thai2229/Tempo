@@ -17,6 +17,9 @@ Endpoints
   GET    /health
   GET    /, /static/<file>   demo page and its assets (HTML carries a strict CSP; 404 JSON when disabled)
 
+Multi-site service (Turnstile-style): KEYAUTH_ENABLE_V1=1 mounts /v1 alongside the endpoints above; needs
+KEYAUTH_TOKEN_KEY (32+ chars, else the app refuses to start). See keyauth.api.v1 and docs/SERVICE.md.
+
 Exactly one of `events` (raw keydown/keyup: [{key, type: "down"|"up", t in ms, code?}], as the
 browser captures them with performance.now()) or `timings` ([[hold, dd, ud], ...] in seconds) is
 required. Events are paired and converted with keyauth.events / keyauth.features, then both paths
