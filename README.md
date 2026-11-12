@@ -68,7 +68,7 @@ python -m keyauth.api
 
 This downloads the CMU data into `data/`, trains in about 2 minutes on a laptop CPU (writes `checkpoints/model.pt`),
 and serves the API and demo page at http://127.0.0.1:8000/. Set `KEYAUTH_DEBUG_SCORES=1` to see scores in the page.
-All settings are environment variables, listed in [.env.example](.env.example).
+All settings are environment variables, listed in [.env.example](.env.example); `KEYAUTH_LANDING=1` serves a public landing page with a live demo at `/` and moves the plain demo page to `/demo`.
 
 No CMU download? Train on synthetic typists to try the pipeline (its numbers are not CMU numbers):
 `python -m keyauth.train --data synthetic --epochs 5`.
