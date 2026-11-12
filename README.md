@@ -104,6 +104,10 @@ With `KEYAUTH_ENABLE_V1=1`, Tempo also runs a Turnstile-style service under `/v1
 end, with a browser test (`scripts/run_integration_e2e.sh`). Details and threat model: [docs/SERVICE.md](docs/SERVICE.md).
 It is a demo, not a hardened production service.
 
+Self-host it: `sh scripts/selfhost_init.sh`, then `docker compose up -d --build` (train a model first with
+`docker compose --profile train run --rm train`). Copy-paste server helpers for Python and Node are in `integrations/`.
+Setup, backups, TLS and your duties for biometric data: [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md). It is a soft signal (~21% EER), not for blocking logins.
+
 ## Tests
 
 ```bash
@@ -118,7 +122,8 @@ Includes the JS tests (skipped without Node). CI runs them on every push and pul
 src/keyauth/   events, features, data/, model/, train.py, baselines.py, thresholds.py,
                auth/ (engine, store), api/ (FastAPI, v1 service), sites.py, web/static/ (demo page, keyauth.js)
 demo_site/     example customer site using the /v1 service
-scripts/       get_cmu.py, compare_models.py, run_integration_e2e.sh
+scripts/       get_cmu.py, compare_models.py, run_integration_e2e.sh, selfhost_init.sh
+integrations/  tempo_verify.py, tempo-verify.mjs (customer-server helpers); docker-compose.yml to self-host
 docs/          PLAN.md (roadmap), RESULTS.md (all numbers), SERVICE.md
 ```
 
