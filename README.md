@@ -150,7 +150,8 @@ src/keyauth/
   baselines.py             scaled Manhattan and Mahalanobis
   thresholds.py            per-user thresholds
   auth/                    engine, SQLite template store, validation, scorers
-  api/                     FastAPI app
+  api/                     FastAPI app; v1.py + tokens.py: multi-site service (docs/SERVICE.md)
+  sites.py                 site admin CLI (python -m keyauth.sites)
   web/static/              demo page (plain HTML and JS, no build step)
 scripts/                   get_cmu.py, compare_models.py
 docs/                      PLAN.md (roadmap), RESULTS.md (all numbers)
@@ -164,6 +165,11 @@ docs/                      PLAN.md (roadmap), RESULTS.md (all numbers)
 - `DELETE /user` removes a user's template and samples. It is an admin action: it needs `KEYAUTH_ADMIN_TOKEN`, so
   nobody can delete a user and re-enroll as them. In the demo page, "Delete my data" therefore shows "Deleting
   needs an admin token".
+
+## Multi-site service
+
+`KEYAUTH_ENABLE_V1=1` adds a Turnstile-style service under `/v1`: the browser gets only a signed 60 s token and the
+customer's server calls `/v1/siteverify`. See docs/SERVICE.md. It is a demo, not a hardened production service.
 
 ## License
 

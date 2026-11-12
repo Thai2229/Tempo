@@ -53,7 +53,7 @@ experiments and their interpretation.
 Where we stopped: C10 and C11 done. C11 found that Aalto pretraining does not lower the CMU login test EER (B2
 21.48% vs 21.23% for the CMU-only recipe on the same runs; Aalto-only 32.98%), so the shipped CMU encoder stays.
 On Aalto itself the model reaches 5.39% test EER on unseen people and sentences; key identity would cut that to
-3.01%, which is the privacy cost of anonymized events. Next: C12. License: non-commercial only, so C12-C13 stay a
+3.01%, which is the privacy cost of anonymized events. Next: C13 (C12 done: see docs/SERVICE.md). License: non-commercial only, so C12-C13 stay a
 portfolio demo unless the authors grant permission.
 
 ## C10: Phrase-independent data (owner: ai-lead)
@@ -78,12 +78,12 @@ portfolio demo unless the authors grant permission.
     the non-commercial license. Details in docs/RESULTS.md (C11).
 
 ## C12: Multi-site service (owner: backend-developer)
-- [ ] Sites table: site_id (= app_id), public site key, hashed secret, allowed origins; admin CLI to create sites
-- [ ] Signed, single-use, 60 s tokens: the browser never receives "accepted", only a token
-- [ ] POST /v1/siteverify {secret, token} -> {success, user_id, rhythm_match, risk}; customer server decides
-- [ ] Enrollment tickets issued to the customer's server only after it authenticates the user (blocks enrolling a victim)
-- [ ] CORS limited to each site's origins; opaque user ids (no emails)
-- [ ] Failure-path tests: forged / expired / reused token, wrong secret, wrong origin, token for another user
+- [x] Sites table: site_id (= app_id), public site key, hashed secret, allowed origins; admin CLI to create sites
+- [x] Signed, single-use, 60 s tokens: the browser never receives "accepted", only a token
+- [x] POST /v1/siteverify {secret, token} -> {success, user_id, rhythm_match, risk}; customer server decides
+- [x] Enrollment tickets issued to the customer's server only after it authenticates the user (blocks enrolling a victim)
+- [x] CORS limited to each site's origins; opaque user ids (no emails)
+- [x] Failure-path tests: forged / expired / reused token, wrong secret, wrong origin, token for another user
 
 ## C13: Embeddable script + demo customer site (owner: frontend-developer, fullstack for wiring)
 - [ ] keyauth.js: capture.js packaged as keyauth.attach(passwordField, {sitekey}), anonymized events, hidden token field

@@ -5,7 +5,7 @@ package can be imported, and tested, without PyTorch.
 """
 
 from keyauth.auth.engine import EngineConfig, EnrollResult, KeyAuthEngine, VerifyResult
-from keyauth.auth.store import TemplateStore, UserRecord
+from keyauth.auth.store import SiteRecord, TemplateStore, UserRecord
 from keyauth.auth.validation import InvalidTimings, validate_timings
 
 __all__ = [
@@ -13,6 +13,7 @@ __all__ = [
     "EnrollResult",
     "InvalidTimings",
     "KeyAuthEngine",
+    "SiteRecord",
     "TemplateStore",
     "UserRecord",
     "VerifyResult",
