@@ -9,7 +9,7 @@ from keyauth.data.cmu import CMU_KEYS, CMU_PHRASE, load_cmu
 from keyauth.data.container import KeystrokeData
 from keyauth.data.preprocess import Normalizer
 from keyauth.data.recordings import append_recording, load_recordings, save_recordings
-from keyauth.data.splits import split_sentences, split_sessions, split_users
+from keyauth.data.splits import split_phrase_independent, split_sentences, split_sessions, split_users
 from keyauth.data.synthetic import make_synthetic_dataset
 
 __all__ = [
@@ -23,6 +23,7 @@ __all__ = [
     "load_recordings",
     "make_synthetic_dataset",
     "save_recordings",
+    "split_phrase_independent",
     "split_sentences",
     "split_sessions",
     "split_users",
