@@ -5,11 +5,11 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from keyauth.auth import EngineConfig, InvalidTimings, KeyAuthEngine, TemplateStore  # noqa: E402
-from keyauth.auth.embedder import TorchEmbedder  # noqa: E402
-from keyauth.data import make_synthetic_dataset, split_users  # noqa: E402
-from keyauth.thresholds import PerUserThresholdParams  # noqa: E402
-from keyauth.train import TrainConfig, load_checkpoint, save_checkpoint, train  # noqa: E402
+from tempo.auth import EngineConfig, InvalidTimings, TempoEngine, TemplateStore  # noqa: E402
+from tempo.auth.embedder import TorchEmbedder  # noqa: E402
+from tempo.data import make_synthetic_dataset, split_users  # noqa: E402
+from tempo.thresholds import PerUserThresholdParams  # noqa: E402
+from tempo.train import TrainConfig, load_checkpoint, save_checkpoint, train  # noqa: E402
 
 MATCH_ANYTHING = 2.0  # the largest possible distance between unit vectors
 
@@ -30,12 +30,12 @@ def attempts(data, user: str, n: int) -> list[np.ndarray]:
     return [data.values[i, : data.lengths[i]].copy() for i in rows]
 
 
-def make_engine(checkpoint, **config) -> KeyAuthEngine:
+def make_engine(checkpoint, **config) -> TempoEngine:
     embedder, threshold = TorchEmbedder.from_checkpoint(checkpoint[0])
-    return KeyAuthEngine(embedder, TemplateStore(), threshold, EngineConfig(enroll_samples=5, **config))
+    return TempoEngine(embedder, TemplateStore(), threshold, EngineConfig(enroll_samples=5, **config))
 
 
-def enrolled(checkpoint, **config) -> tuple[KeyAuthEngine, list[np.ndarray]]:
+def enrolled(checkpoint, **config) -> tuple[TempoEngine, list[np.ndarray]]:
     _, data = checkpoint
     engine = make_engine(checkpoint, **config)
     user = data.users[0]
@@ -91,7 +91,7 @@ def test_malformed_timings_are_rejected_before_the_model(checkpoint):
 def test_inconsistent_enrollment_restarts(checkpoint):
     _, data = checkpoint
     embedder, _ = TorchEmbedder.from_checkpoint(checkpoint[0])
-    engine = KeyAuthEngine(embedder, TemplateStore(), threshold=1e-9, config=EngineConfig(enroll_samples=5))
+    engine = TempoEngine(embedder, TemplateStore(), threshold=1e-9, config=EngineConfig(enroll_samples=5))
     results = [engine.enroll("app", "alice", a) for a in attempts(data, data.users[0], 5)]
     assert results[-1].status == "rejected" and results[-1].reason == "inconsistent"
 
@@ -112,14 +112,14 @@ def test_engine_with_checkpoint_params_stores_a_user_threshold(checkpoint):
     path, data = checkpoint
     embedder, threshold = TorchEmbedder.from_checkpoint(path)
     params = PerUserThresholdParams(scale=1.0, weight=1.0, reference_spread=0.1)
-    engine = KeyAuthEngine(embedder, TemplateStore(), threshold, EngineConfig(enroll_samples=5), per_user=params)
+    engine = TempoEngine(embedder, TemplateStore(), threshold, EngineConfig(enroll_samples=5), per_user=params)
     results = [engine.enroll("app", "alice", a) for a in attempts(data, data.users[0], 5)]
     assert results[-1].status == "complete"
     stored = engine.store.get_user("app", "alice").threshold
     assert stored is not None and 0.05 <= stored <= 0.2  # clipped to [0.5, 2] * reference_spread
 
 
-def test_checkpoint_that_is_not_keyauth_is_rejected(tmp_path):
+def test_checkpoint_that_is_not_tempo_is_rejected(tmp_path):
     path = tmp_path / "other.pt"
     torch.save({"format": "something-else"}, path)
     with pytest.raises(ValueError):

@@ -3,12 +3,12 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from keyauth.api import Settings, create_app  # noqa: E402
-from keyauth.auth import EngineConfig, KeyAuthEngine, TemplateStore  # noqa: E402
+from tempo.api import Settings, create_app  # noqa: E402
+from tempo.auth import EngineConfig, TempoEngine, TemplateStore  # noqa: E402
 
 
 def make_client(**settings) -> TestClient:
-    engine = KeyAuthEngine(lambda t: t[:, 0], TemplateStore(), 0.5, EngineConfig())
+    engine = TempoEngine(lambda t: t[:, 0], TemplateStore(), 0.5, EngineConfig())
     return TestClient(create_app(engine, Settings(**settings)))
 
 
@@ -65,20 +65,20 @@ def test_api_routes_unaffected():
 
 def test_serve_ui_env_setting():
     assert Settings.from_env({}).serve_ui is True
-    assert Settings.from_env({"KEYAUTH_SERVE_UI": "0"}).serve_ui is False
+    assert Settings.from_env({"TEMPO_SERVE_UI": "0"}).serve_ui is False
 
 
 def test_favicon_is_empty_204():
     assert make_client().get("/favicon.ico").status_code == 204
 
 
-# ---- landing page (KEYAUTH_LANDING) ----------------------------------------
+# ---- landing page (TEMPO_LANDING) ----------------------------------------
 
 
 def test_landing_env_setting():
     assert Settings.from_env({}).landing is False
-    assert Settings.from_env({"KEYAUTH_LANDING": "1"}).landing is True
-    assert Settings.from_env({"KEYAUTH_LANDING": "0"}).landing is False
+    assert Settings.from_env({"TEMPO_LANDING": "1"}).landing is True
+    assert Settings.from_env({"TEMPO_LANDING": "0"}).landing is False
 
 
 def test_landing_off_by_default_demo_stays_at_root():

@@ -7,8 +7,8 @@ torch = pytest.importorskip("torch")
 
 from torch.utils.data import DataLoader  # noqa: E402
 
-from keyauth.data import KeystrokeData, Normalizer, make_synthetic_dataset  # noqa: E402
-from keyauth.data.torch_dataset import KeystrokeDataset, PKBatchSampler  # noqa: E402
+from tempo.data import KeystrokeData, Normalizer, make_synthetic_dataset  # noqa: E402
+from tempo.data.torch_dataset import KeystrokeDataset, PKBatchSampler  # noqa: E402
 
 
 @pytest.fixture

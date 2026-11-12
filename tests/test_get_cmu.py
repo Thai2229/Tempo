@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from keyauth.data.cmu import cmu_timing_columns
+from tempo.data.cmu import cmu_timing_columns
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "get_cmu.py"
 

@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from keyauth.data import (
+from tempo.data import (
     CMU_KEYS,
     KeystrokeData,
     Normalizer,
@@ -14,9 +14,9 @@ from keyauth.data import (
     split_sessions,
     split_users,
 )
-from keyauth.data.cmu import cmu_timing_columns
-from keyauth.data.preprocess import transform, valid_mask
-from keyauth.features import TimingSequence
+from tempo.data.cmu import cmu_timing_columns
+from tempo.data.preprocess import transform, valid_mask
+from tempo.features import TimingSequence
 
 
 @pytest.fixture

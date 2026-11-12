@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { PHRASE, Recorder, anonymize, isComplete, isValidUserId, matchesPhrase } from "../../src/keyauth/web/static/capture.js";
+import { PHRASE, Recorder, anonymize, isComplete, isValidUserId, matchesPhrase } from "../../src/tempo/web/static/capture.js";
 
 const CODES = { ".": "Period", t: "KeyT", i: "KeyI", e: "KeyE", 5: "Digit5", R: "KeyR", o: "KeyO", a: "KeyA", n: "KeyN", l: "KeyL", Enter: "Enter" };
 

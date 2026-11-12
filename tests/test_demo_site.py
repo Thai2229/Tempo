@@ -1,4 +1,4 @@
-"""Server logic of demo_site (the independent customer site), against a stub keyauth. No model, no network."""
+"""Server logic of demo_site (the independent customer site), against a stub tempo. No model, no network."""
 
 from __future__ import annotations
 
@@ -16,16 +16,16 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from demo_site.app import COOKIE, create_app, decide_login  # noqa: E402
 from demo_site.config import SiteConfig  # noqa: E402
-from demo_site.keyauth_client import KeyauthClient  # noqa: E402
+from demo_site.tempo_client import TempoClient  # noqa: E402
 from demo_site.store import Store, check_password, hash_password  # noqa: E402
 
 SECRET = "sk.site1.SUPER-SECRET-VALUE"
 SITEKEY = "pk_public_key"
-KEYAUTH = "http://127.0.0.1:8765"
+TEMPO = "http://127.0.0.1:8765"
 PASSWORD = "correct horse"
 
 
-class StubKeyauth:
+class StubTempo:
     """Records calls; answers siteverify with `verdict` (None = unreachable)."""
 
     def __init__(self) -> None:
@@ -48,14 +48,14 @@ class StubKeyauth:
 
 
 def make_config(tmp_path, **over: Any) -> SiteConfig:
-    values = dict(keyauth_url=KEYAUTH, site_secret=SECRET, site_key=SITEKEY, db_path=str(tmp_path / "site.db"), pepper=b"p" * 32)
+    values = dict(tempo_url=TEMPO, site_secret=SECRET, site_key=SITEKEY, db_path=str(tmp_path / "site.db"), pepper=b"p" * 32)
     values.update(over)
     return SiteConfig(**values)
 
 
 @pytest.fixture
-def stub() -> StubKeyauth:
-    return StubKeyauth()
+def stub() -> StubTempo:
+    return StubTempo()
 
 
 @pytest.fixture
@@ -76,13 +76,13 @@ def opaque_id(config: SiteConfig, name: str = "alice") -> str:
     return Store(config.db_path).get_user(name).opaque_id
 
 
-def fresh(config: SiteConfig, stub: StubKeyauth) -> TestClient:
+def fresh(config: SiteConfig, stub: StubTempo) -> TestClient:
     """A second browser (no cookies) against the same site."""
     return TestClient(create_app(config, client=stub), follow_redirects=False)
 
 
 def login(c: TestClient, token: str = "", name: str = "alice", password: str = PASSWORD):
-    return c.post("/login", data={"username": name, "password": password, "keyauth_token": token})
+    return c.post("/login", data={"username": name, "password": password, "tempo_token": token})
 
 
 def logged_in(c: TestClient) -> bool:
@@ -244,7 +244,7 @@ def test_oversized_token_is_invalid_not_fail_open(client, config, stub):
     assert stub.names() == []
 
 
-def test_unreachable_keyauth_fails_open_and_is_flagged(client, config, stub, caplog):
+def test_unreachable_tempo_fails_open_and_is_flagged(client, config, stub, caplog):
     register(client)
     c2 = fresh(config, stub)
     stub.verdict = None
@@ -252,7 +252,7 @@ def test_unreachable_keyauth_fails_open_and_is_flagged(client, config, stub, cap
         response = login(c2, "tok")
     assert response.headers["location"] == "/account" and logged_in(c2)
     flagged = [r for r in caplog.records if r.levelno >= logging.WARNING and "FLAG" in r.getMessage()]
-    assert flagged and "keyauth_unreachable" in flagged[0].getMessage()
+    assert flagged and "tempo_unreachable" in flagged[0].getMessage()
 
 
 def test_empty_token_fails_open_and_is_flagged(client, config, stub, caplog):
@@ -344,10 +344,10 @@ def test_pages_have_strict_csp_and_no_secret_or_inline_script(client, config):
         assert response.status_code == 200, path
         assert SECRET not in response.text and "sk." not in response.text.replace("task.", "")
         csp = response.headers["content-security-policy"]
-        assert f"script-src 'self' {KEYAUTH};" in csp and f"connect-src 'self' {KEYAUTH};" in csp
+        assert f"script-src 'self' {TEMPO};" in csp and f"connect-src 'self' {TEMPO};" in csp
         assert "unsafe-inline" not in csp and "unsafe-eval" not in csp
         if path in {"/login", "/account"}:
-            assert f'<script src="{KEYAUTH}/v1/keyauth.js" defer>' in response.text
+            assert f'<script src="{TEMPO}/v1/tempo.js" defer>' in response.text
             assert f'data-sitekey="{SITEKEY}"' in response.text
         assert "<script>" not in response.text and " onclick=" not in response.text
 
@@ -360,12 +360,12 @@ def test_username_is_escaped(client):
 
 
 def test_config_requires_env_and_hides_secret():
-    with pytest.raises(ValueError, match="KEYAUTH_SITE_SECRET"):
-        SiteConfig.from_env({"KEYAUTH_URL": KEYAUTH, "KEYAUTH_SITE_KEY": "k"})
-    cfg = SiteConfig.from_env({"KEYAUTH_URL": KEYAUTH + "/x/", "KEYAUTH_SITE_SECRET": SECRET, "KEYAUTH_SITE_KEY": "k"})
-    assert cfg.keyauth_url == KEYAUTH and SECRET not in repr(cfg) and cfg.fail_mode == "open"
+    with pytest.raises(ValueError, match="TEMPO_SITE_SECRET"):
+        SiteConfig.from_env({"TEMPO_URL": TEMPO, "TEMPO_SITE_KEY": "k"})
+    cfg = SiteConfig.from_env({"TEMPO_URL": TEMPO + "/x/", "TEMPO_SITE_SECRET": SECRET, "TEMPO_SITE_KEY": "k"})
+    assert cfg.tempo_url == TEMPO and SECRET not in repr(cfg) and cfg.fail_mode == "open"
     with pytest.raises(ValueError):
-        SiteConfig.from_env({"KEYAUTH_URL": KEYAUTH, "KEYAUTH_SITE_SECRET": "s", "KEYAUTH_SITE_KEY": "k", "DEMO_SITE_FAIL_MODE": "maybe"})
+        SiteConfig.from_env({"TEMPO_URL": TEMPO, "TEMPO_SITE_SECRET": "s", "TEMPO_SITE_KEY": "k", "DEMO_SITE_FAIL_MODE": "maybe"})
 
 
 # ---- the real HTTP client against a tiny local stub ------------------------------------------------------------
@@ -396,7 +396,7 @@ def test_real_client_sends_secret_in_body_without_origin():
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        c = KeyauthClient(f"http://127.0.0.1:{server.server_port}", SECRET)
+        c = TempoClient(f"http://127.0.0.1:{server.server_port}", SECRET)
         assert c.siteverify("tok")["rhythm_match"] is True
         assert c.siteverify("tok") is not None
         status, _ = c.create_ticket("u_x", False)
@@ -407,7 +407,7 @@ def test_real_client_sends_secret_in_body_without_origin():
 
 
 def test_real_client_maps_unreachable_and_errors_to_none():
-    c = KeyauthClient("http://127.0.0.1:9", SECRET, timeout_s=0.5)  # nothing listens on the discard port
+    c = TempoClient("http://127.0.0.1:9", SECRET, timeout_s=0.5)  # nothing listens on the discard port
     assert c.siteverify("tok") is None
     assert c.create_ticket("u_x", False) == (0, None)
 

@@ -98,7 +98,7 @@ class RangeReader:
     def _get(self, start: int, length: int) -> tuple[bytes, str]:
         end = start + length - 1
         request = urllib.request.Request(
-            self.url, headers={"Range": f"bytes={start}-{end}", "User-Agent": "keyauth-get-aalto"}
+            self.url, headers={"Range": f"bytes={start}-{end}", "User-Agent": "tempo-get-aalto"}
         )
         last_error: Exception | None = None
         for attempt in range(RETRIES):

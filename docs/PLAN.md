@@ -23,12 +23,12 @@ level with scaled Manhattan (22.14 +/- 5.98%). Details and caveats in docs/RESUL
 
 ## C6b: Per-user verification (owner: ai-lead, backend-developer for engine wiring)
 - [x] Per-user thresholds set at enrollment, to cut the false-reject rate (37.79% test FRR on split seed 0 at the global val threshold)
-  - `KeyAuthEngine(per_user=...)`; on by default in the API (`KEYAUTH_PER_USER=1`, owner decision in C7). On CMU they trade FRR for FAR (seed 0 test FRR 36.76 -> 31.76, FAR 13.93 -> 15.00) and leave EER within noise (docs/RESULTS.md, C6b).
+  - `TempoEngine(per_user=...)`; on by default in the API (`TEMPO_PER_USER=1`, owner decision in C7). On CMU they trade FRR for FAR (seed 0 test FRR 36.76 -> 31.76, FAR 13.93 -> 15.00) and leave EER within noise (docs/RESULTS.md, C6b).
 - [x] Optional support for the classic detectors in the engine (per-user statistics at scoring time)
-  - `KeyAuthEngine(embedder=None, scorer=ScaledManhattanScorer() | MahalanobisScorer())`; state persisted as JSON in the store.
+  - `TempoEngine(embedder=None, scorer=ScaledManhattanScorer() | MahalanobisScorer())`; state persisted as JSON in the store.
 
 ## C7: HTTP API (owner: backend-developer)
-- [x] FastAPI app in src/keyauth/api: POST /enroll, POST /verify, GET /status, DELETE /user, GET /health
+- [x] FastAPI app in src/tempo/api: POST /enroll, POST /verify, GET /status, DELETE /user, GET /health
 - [x] Request validation reuses auth/validation.py; consistent error shapes
 - [x] Rate limiting / lockout surfaced in responses; no raw timings or embeddings in logs
 - [x] Tests with FastAPI TestClient covering accept, reject, locked, replay, not enrolled
@@ -53,7 +53,7 @@ experiments and their interpretation.
 Where we stopped: C10 and C11 done. C11 found that Aalto pretraining does not lower the CMU login test EER (B2
 21.48% vs 21.23% for the CMU-only recipe on the same runs; Aalto-only 32.98%), so the shipped CMU encoder stays.
 On Aalto itself the model reaches 5.39% test EER on unseen people and sentences; key identity would cut that to
-3.01%, which is the privacy cost of anonymized events. C12 (docs/SERVICE.md) and C13 (keyauth.js, demo_site/) done: the Turnstile-style demo works end to end. License: non-commercial only, so C12-C13 stay a
+3.01%, which is the privacy cost of anonymized events. C12 (docs/SERVICE.md) and C13 (tempo.js, demo_site/) done: the Turnstile-style demo works end to end. License: non-commercial only, so C12-C13 stay a
 portfolio demo unless the authors grant permission.
 
 ## C10: Phrase-independent data (owner: ai-lead)
@@ -88,6 +88,6 @@ portfolio demo unless the authors grant permission.
 - [x] Failure-path tests: forged / expired / reused token, wrong secret, wrong origin, token for another user
 
 ## C13: Embeddable script + demo customer site (owner: frontend-developer, fullstack for wiring)
-- [x] keyauth.js: capture.js packaged as keyauth.attach(passwordField, {sitekey}), anonymized events, hidden token field
-- [x] Separate small demo "customer" site with its own users and hashed passwords that integrates keyauth end to end
+- [x] tempo.js: capture.js packaged as tempo.attach(passwordField, {sitekey}), anonymized events, hidden token field
+- [x] Separate small demo "customer" site with its own users and hashed passwords that integrates tempo end to end
 - [x] Browser e2e test of the integration (like C8's)

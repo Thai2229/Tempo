@@ -9,12 +9,12 @@ import sqlite3
 import numpy as np
 import pytest
 
-from keyauth.auth import EngineConfig, KeyAuthEngine, TemplateStore
-from keyauth.auth.scorers import MahalanobisScorer, ScaledManhattanScorer, ScorerState, enrollment_loo_scores, timing_vector
-from keyauth.evaluate import compute_eer, verification_scores
-from keyauth.features import extract_features
-from keyauth.synthetic import make_typist, simulate_attempt
-from keyauth.thresholds import PerUserThresholdParams, embedding_threshold, enrollment_spread, embedding_loo_scores
+from tempo.auth import EngineConfig, TempoEngine, TemplateStore
+from tempo.auth.scorers import MahalanobisScorer, ScaledManhattanScorer, ScorerState, enrollment_loo_scores, timing_vector
+from tempo.evaluate import compute_eer, verification_scores
+from tempo.features import extract_features
+from tempo.synthetic import make_typist, simulate_attempt
+from tempo.thresholds import PerUserThresholdParams, embedding_threshold, enrollment_spread, embedding_loo_scores
 
 PHRASE = "hunter2!"
 N_ENROLL = 10
@@ -115,7 +115,7 @@ def make_embedder_engine(calibration, clock, per_user=True, **config):
         params = None
     config.setdefault("max_failures", 1000)
     config.setdefault("enroll_samples", N_ENROLL)
-    return KeyAuthEngine(
+    return TempoEngine(
         fake_embedder,
         TemplateStore(),
         threshold,
@@ -160,7 +160,7 @@ def test_non_finite_or_non_positive_user_threshold_falls_back_to_global(
     embedder_calibration, clock, typists, monkeypatch, bad
 ):
     alice, _, rng = typists
-    monkeypatch.setattr("keyauth.auth.engine.embedding_threshold", lambda samples, params: bad)
+    monkeypatch.setattr("tempo.auth.engine.embedding_threshold", lambda samples, params: bad)
     engine = make_embedder_engine(embedder_calibration, clock)
     assert enroll_fully(engine, alice, rng).status == "complete"
     assert engine.store.get_user("app", "alice").threshold is None
@@ -173,7 +173,7 @@ def test_failing_computation_falls_back_to_global_without_crashing(embedder_cali
     def boom(samples, params):
         raise ValueError("cannot compute")
 
-    monkeypatch.setattr("keyauth.auth.engine.embedding_threshold", boom)
+    monkeypatch.setattr("tempo.auth.engine.embedding_threshold", boom)
     engine = make_embedder_engine(embedder_calibration, clock)
     assert enroll_fully(engine, alice, rng).status == "complete"
     assert engine.store.get_user("app", "alice").threshold is None
@@ -189,7 +189,7 @@ def test_too_few_enrollment_attempts_fall_back_to_global(embedder_calibration, c
 def test_inconsistent_enrollment_check_stays_on_the_global_threshold(typists):
     alice, _, rng = typists
     loose = PerUserThresholdParams(scale=100.0, weight=0.0, reference_spread=1.0)  # per-user threshold would be huge
-    engine = KeyAuthEngine(RandomEmbedder(), TemplateStore(), threshold=0.5, per_user=loose)
+    engine = TempoEngine(RandomEmbedder(), TemplateStore(), threshold=0.5, per_user=loose)
     results = [engine.enroll("app", "alice", a) for a in attempts(alice, rng, 10)]
     assert results[-1].status == "rejected" and results[-1].reason == "inconsistent"
     assert engine.store.get_user("app", "alice").threshold is None
@@ -218,11 +218,11 @@ def test_adaptation_uses_the_per_user_threshold(embedder_calibration, clock, typ
 
 def test_constructor_needs_exactly_one_of_embedder_and_scorer():
     with pytest.raises(ValueError):
-        KeyAuthEngine(None, TemplateStore(), 1.0)
+        TempoEngine(None, TemplateStore(), 1.0)
     with pytest.raises(ValueError):
-        KeyAuthEngine(fake_embedder, TemplateStore(), 1.0, scorer=ScaledManhattanScorer())
+        TempoEngine(fake_embedder, TemplateStore(), 1.0, scorer=ScaledManhattanScorer())
     with pytest.raises(ValueError):
-        KeyAuthEngine(None, TemplateStore(), 1.0, EngineConfig(enroll_samples=2), scorer=ScaledManhattanScorer())
+        TempoEngine(None, TemplateStore(), 1.0, EngineConfig(enroll_samples=2), scorer=ScaledManhattanScorer())
 
 
 # ---- scorer mode ----------------------------------------------------------
@@ -233,7 +233,7 @@ def make_scorer_engine(calibration, clock, per_user=False, **config):
     if not per_user:
         params = None
     config.setdefault("max_failures", 1000)
-    return KeyAuthEngine(
+    return TempoEngine(
         None,
         TemplateStore(),
         threshold,
@@ -263,12 +263,12 @@ def test_scorer_enrollment_stores_state_and_timing_vectors(scorer_calibration, c
 def test_scorer_state_survives_reopening_the_database(scorer_calibration, clock, typists, tmp_path):
     alice, _, rng = typists
     scorer, threshold, _ = scorer_calibration
-    path = tmp_path / "keyauth.db"
-    engine = KeyAuthEngine(None, TemplateStore(path), threshold, EngineConfig(enroll_samples=N_ENROLL), clock=clock, scorer=scorer)
+    path = tmp_path / "tempo.db"
+    engine = TempoEngine(None, TemplateStore(path), threshold, EngineConfig(enroll_samples=N_ENROLL), clock=clock, scorer=scorer)
     enroll_fully(engine, alice, rng)
     saved = engine.store.get_user("app", "alice").scorer_state
     engine.store.close()
-    reopened = KeyAuthEngine(None, TemplateStore(path), threshold, EngineConfig(enroll_samples=N_ENROLL), clock=clock, scorer=scorer)
+    reopened = TempoEngine(None, TemplateStore(path), threshold, EngineConfig(enroll_samples=N_ENROLL), clock=clock, scorer=scorer)
     assert reopened.store.get_user("app", "alice").scorer_state == saved
     assert reopened.verify("app", "alice", attempts(alice, rng, 1)[0]).reason in ("match", "no_match")
 
@@ -298,7 +298,7 @@ def test_scorer_per_user_threshold_is_stored_and_used(scorer_calibration, clock,
 
 def test_scorer_per_user_fallback_when_threshold_is_not_finite(scorer_calibration, clock, typists, monkeypatch):
     alice, _, rng = typists
-    monkeypatch.setattr("keyauth.auth.engine.user_threshold", lambda loo, params: float("nan"))
+    monkeypatch.setattr("tempo.auth.engine.user_threshold", lambda loo, params: float("nan"))
     engine = make_scorer_engine(scorer_calibration, clock, per_user=True)
     assert enroll_fully(engine, alice, rng).status == "complete"
     assert engine.store.get_user("app", "alice").threshold is None
@@ -308,7 +308,7 @@ def test_scorer_per_user_fallback_when_threshold_is_not_finite(scorer_calibratio
 def test_scorer_inconsistent_enrollment_restarts(scorer_calibration, clock, typists):
     alice, _, rng = typists
     scorer, _, params = scorer_calibration
-    engine = KeyAuthEngine(
+    engine = TempoEngine(
         None, TemplateStore(), 1e-9, EngineConfig(enroll_samples=N_ENROLL), per_user=params, scorer=scorer
     )
     result = enroll_fully(engine, alice, rng)
@@ -410,7 +410,7 @@ def test_scorer_corrupt_state_fails_closed_with_a_reason(scorer_calibration, clo
 def test_scorer_state_of_another_kind_is_rejected(clock, typists):
     alice, _, rng = typists
     manhattan, mahalanobis = ScaledManhattanScorer(), MahalanobisScorer()
-    engine = KeyAuthEngine(None, TemplateStore(), 100.0, EngineConfig(enroll_samples=N_ENROLL), clock=clock, scorer=manhattan)
+    engine = TempoEngine(None, TemplateStore(), 100.0, EngineConfig(enroll_samples=N_ENROLL), clock=clock, scorer=manhattan)
     enroll_fully(engine, alice, rng)
     vectors = engine.store.get_samples("app", "alice", "enroll")
     engine.store.set_scorer_state("app", "alice", mahalanobis.fit(vectors).to_json(), clock())

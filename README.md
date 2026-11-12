@@ -8,8 +8,6 @@ next to the password.
 
 *The demo page, recorded with a scripted browser: it enrolls with 10 attempts, then logs in.*
 
-> The Python package, environment variables and script are still named `keyauth` (`import keyauth`, `KEYAUTH_*`).
-
 ## How it works
 
 1. **Capture.** The browser records key down/up times in milliseconds. It replaces every key with an anonymous
@@ -59,19 +57,19 @@ python scripts/get_cmu.py
 ```
 
 ```bash
-python -m keyauth.train --data cmu
+python -m tempo.train --data cmu
 ```
 
 ```bash
-python -m keyauth.api
+python -m tempo.api
 ```
 
 This downloads the CMU data into `data/`, trains in about 2 minutes on a laptop CPU (writes `checkpoints/model.pt`),
-and serves the API and demo page at http://127.0.0.1:8000/. Set `KEYAUTH_DEBUG_SCORES=1` to see scores in the page.
-All settings are environment variables, listed in [.env.example](.env.example); `KEYAUTH_LANDING=1` serves a public landing page with a live demo at `/` and moves the plain demo page to `/demo`.
+and serves the API and demo page at http://127.0.0.1:8000/. Set `TEMPO_DEBUG_SCORES=1` to see scores in the page.
+All settings are environment variables, listed in [.env.example](.env.example); `TEMPO_LANDING=1` serves a public landing page with a live demo at `/` and moves the plain demo page to `/demo`.
 
 No CMU download? Train on synthetic typists to try the pipeline (its numbers are not CMU numbers):
-`python -m keyauth.train --data synthetic --epochs 5`.
+`python -m tempo.train --data synthetic --epochs 5`.
 
 **Docker.** The model is not baked into the image: train first, then mount `checkpoints/`.
 
@@ -90,7 +88,7 @@ docker run --rm -p 8000:8000 -v "$PWD/checkpoints:/app/checkpoints:ro" -v tempo-
 | `POST /enroll` `{user_id, events \| timings}` | add one enrollment attempt |
 | `POST /verify` `{user_id, events \| timings}` | `{accepted, reason}`; locked accounts get 423 |
 | `GET /status?user_id=` | enrollment and lock status |
-| `DELETE /user?user_id=` | delete a template; needs `Authorization: Bearer $KEYAUTH_ADMIN_TOKEN` |
+| `DELETE /user?user_id=` | delete a template; needs `Authorization: Bearer $TEMPO_ADMIN_TOKEN` |
 | `GET /health` | liveness and whether the model loaded |
 
 Errors have the shape `{"error": {"code", "message"}}`. Requests are rate-limited. Logs carry a hash of `user_id`
@@ -98,8 +96,8 @@ and the outcome, never timings or scores.
 
 ## Use it on other sites (demo)
 
-With `KEYAUTH_ENABLE_V1=1`, Tempo also runs a Turnstile-style service under `/v1`. A customer page adds
-`keyauth.js` and gets back only a signed, single-use 60 s token; the customer's **server** then calls
+With `TEMPO_ENABLE_V1=1`, Tempo also runs a Turnstile-style service under `/v1`. A customer page adds
+`tempo.js` and gets back only a signed, single-use 60 s token; the customer's **server** then calls
 `/v1/siteverify` and decides. [`demo_site/`](demo_site/README.md) is a small customer site that does this end to
 end, with a browser test (`scripts/run_integration_e2e.sh`). Details and threat model: [docs/SERVICE.md](docs/SERVICE.md).
 It is a demo, not a hardened production service.
@@ -119,8 +117,8 @@ Includes the JS tests (skipped without Node). CI runs them on every push and pul
 ## Layout
 
 ```
-src/keyauth/   events, features, data/, model/, train.py, baselines.py, thresholds.py,
-               auth/ (engine, store), api/ (FastAPI, v1 service), sites.py, web/static/ (demo page, keyauth.js)
+src/tempo/   events, features, data/, model/, train.py, baselines.py, thresholds.py,
+               auth/ (engine, store), api/ (FastAPI, v1 service), sites.py, web/static/ (demo page, tempo.js)
 demo_site/     example customer site using the /v1 service
 scripts/       get_cmu.py, compare_models.py, run_integration_e2e.sh, selfhost_init.sh
 integrations/  tempo_verify.py, tempo-verify.mjs (customer-server helpers); docker-compose.yml to self-host

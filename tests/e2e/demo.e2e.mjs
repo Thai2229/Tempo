@@ -1,5 +1,5 @@
 // Real-browser check of the demo page. Not part of pytest. Run (server already started):
-//   KEYAUTH_DB=/tmp/e2e.db KEYAUTH_DEBUG_SCORES=1 KEYAUTH_PORT=8765 python -m keyauth.api &
+//   TEMPO_DB=/tmp/e2e.db TEMPO_DEBUG_SCORES=1 TEMPO_PORT=8765 python -m tempo.api &
 //   E2E_URL=http://127.0.0.1:8765 E2E_SHOT=/tmp/demo.png node tests/e2e/demo.e2e.mjs
 // E2E_VIDEO=<dir> also records a .webm of the run (used for docs/demo.gif).
 import { createRequire } from "node:module";

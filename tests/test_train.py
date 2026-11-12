@@ -5,8 +5,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from keyauth.data import make_synthetic_dataset, split_users  # noqa: E402
-from keyauth.train import (  # noqa: E402
+from tempo.data import make_synthetic_dataset, split_users  # noqa: E402
+from tempo.train import (  # noqa: E402
     TrainConfig,
     compute_loss,
     embed,
@@ -53,7 +53,7 @@ def test_checkpoint_roundtrip(trained, tmp_path):
 
 
 def test_checkpoint_stores_per_user_threshold_params(trained, tmp_path):
-    from keyauth.thresholds import PerUserThresholdParams
+    from tempo.thresholds import PerUserThresholdParams
 
     model, normalizer, _, _ = trained
     params = PerUserThresholdParams(scale=1.5, weight=0.25, reference_spread=0.5)
@@ -64,14 +64,14 @@ def test_checkpoint_stores_per_user_threshold_params(trained, tmp_path):
 
 
 def test_checkpoint_without_per_user_params_still_loads(trained, tmp_path):
-    from keyauth.thresholds import PerUserThresholdParams
+    from tempo.thresholds import PerUserThresholdParams
 
     model, normalizer, _, _ = trained
     path = tmp_path / "old.pt"
     # a pre-C6b checkpoint: exactly the keys the old save_checkpoint wrote
     torch.save(
         {
-            "format": "keyauth-v1",
+            "format": "tempo-v1",
             "encoder_config": model.config.to_dict(),
             "state_dict": model.state_dict(),
             "normalizer": normalizer.to_dict(),
@@ -84,6 +84,18 @@ def test_checkpoint_without_per_user_params_still_loads(trained, tmp_path):
     assert meta["threshold"] == pytest.approx(0.42)
     assert meta["per_user_threshold"] is None
     assert PerUserThresholdParams.from_meta(meta) is None
+
+
+def test_checkpoint_with_the_pre_rename_format_tag_still_loads(trained, tmp_path):
+    model, normalizer, _, _ = trained
+    path = tmp_path / "model.pt"
+    save_checkpoint(path, model, normalizer, threshold=0.42, metrics={})
+    ckpt = torch.load(path, map_location="cpu", weights_only=True)
+    assert ckpt["format"] == "tempo-v1"
+    ckpt["format"] = "keyauth-v1"
+    torch.save(ckpt, path)
+    _, _, meta = load_checkpoint(path)
+    assert meta["threshold"] == pytest.approx(0.42)
 
 
 def test_load_rejects_other_files(tmp_path):

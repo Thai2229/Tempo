@@ -12,9 +12,9 @@ git clone <this repository> tempo && cd tempo
 sh scripts/selfhost_init.sh
 ```
 
-`selfhost_init.sh` creates `.env` (mode 600, gitignored) with a random `KEYAUTH_TOKEN_KEY` (signs tokens) and
-`KEYAUTH_ADMIN_TOKEN`, and your user/group id for the training job. It never overwrites a value that is already
-there and never prints a secret. Compose refuses to start without `KEYAUTH_TOKEN_KEY`.
+`selfhost_init.sh` creates `.env` (mode 600, gitignored) with a random `TEMPO_TOKEN_KEY` (signs tokens) and
+`TEMPO_ADMIN_TOKEN`, and your user/group id for the training job. It never overwrites a value that is already
+there and never prints a secret. Compose refuses to start without `TEMPO_TOKEN_KEY`.
 
 **Get a model.** The image does not contain one. Train on the CMU benchmark (about 2 minutes on a laptop CPU; needs
 network to download the data from cmu.edu):
@@ -37,7 +37,7 @@ curl http://127.0.0.1:8000/health        # {"status":"ok","model_loaded":true}
 **Create a site** (one per website; the origin is the exact scheme + host of your login page):
 
 ```bash
-docker compose exec tempo python -m keyauth.sites create --name "My shop" --origin https://shop.example
+docker compose exec tempo python -m tempo.sites create --name "My shop" --origin https://shop.example
 ```
 
 It prints the public **site key** (`pk_...`, goes in your page) and the **secret** (`sk....`, server side only).
@@ -49,30 +49,30 @@ The secret is shown once and only a hash is stored: put it in your server's secr
 (see [TLS](#tls-reverse-proxy)):
 
 ```html
-<script src="https://tempo.example.com/v1/keyauth.js" defer></script>
+<script src="https://tempo.example.com/v1/tempo.js" defer></script>
 <script src="/login-page.js" defer></script>
 ```
 ```js
 // login-page.js (same-origin file)
-keyauth.attach(document.getElementById("pw"), {sitekey: "pk_...", userIdField: "#keyauth-uid"});
+tempo.attach(document.getElementById("pw"), {sitekey: "pk_...", userIdField: "#tempo-uid"});
 ```
 
 `userIdField` holds an **opaque id** for the account (`[A-Za-z0-9._-]{1,64}`, not an email or username). The form now
-posts an extra field `keyauth_token`. If your page has a CSP, `script-src` and `connect-src` must include the Tempo
-host. Enrollment (`keyauth.enroll`, 10 typed samples) is described in [SERVICE.md](SERVICE.md#embedding).
+posts an extra field `tempo_token`. If your page has a CSP, `script-src` and `connect-src` must include the Tempo
+host. Enrollment (`tempo.enroll`, 10 typed samples) is described in [SERVICE.md](SERVICE.md#embedding).
 
 **Add it to your server.** Copy one file, `integrations/python/tempo_verify.py` or `integrations/node/tempo-verify.mjs`
 (standard library only), and after you checked the password:
 
 ```python
 from tempo_verify import verify, issue_ticket
-r = verify(os.environ["TEMPO_SECRET"], request.form.get("keyauth_token", ""), "https://tempo.example.com")
+r = verify(os.environ["TEMPO_SECRET"], request.form.get("tempo_token", ""), "https://tempo.example.com")
 ok = r.success and r.user_id == account.tempo_id and r.rhythm_match      # else: second factor, or fail open
 # to enroll a logged-in user, hand the page a ticket:  issue_ticket(secret, account.tempo_id, url).ticket
 ```
 ```js
 import { verify, issueTicket } from "./tempo-verify.mjs";
-const r = await verify(process.env.TEMPO_SECRET, req.body.keyauth_token, "https://tempo.example.com");
+const r = await verify(process.env.TEMPO_SECRET, req.body.tempo_token, "https://tempo.example.com");
 const ok = r.success && r.user_id === account.tempoId && r.rhythm_match;   // else: second factor, or fail open
 ```
 
@@ -83,8 +83,8 @@ is single use and lives 60 seconds; always compare `user_id` with the account th
 goes in a page, a log, or a URL.
 
 **Try it with the demo shop.** [`demo_site/`](../demo_site/README.md) is a complete customer site. Create a site for
-`http://127.0.0.1:9000`, then run it with `KEYAUTH_URL=http://127.0.0.1:8000`, `KEYAUTH_SITE_KEY` and
-`KEYAUTH_SITE_SECRET` from the `create` output.
+`http://127.0.0.1:9000`, then run it with `TEMPO_URL=http://127.0.0.1:8000`, `TEMPO_SITE_KEY` and
+`TEMPO_SITE_SECRET` from the `create` output.
 
 ## Settings
 
@@ -93,17 +93,17 @@ Put them in `.env` (compose reads it) or export them. Only these reach the conta
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `KEYAUTH_TOKEN_KEY` | none, required | HMAC key that signs tokens, 32+ characters. Rotating it invalidates tokens in flight (at most 60 s). |
-| `KEYAUTH_ADMIN_TOKEN` | empty | Bearer token for `DELETE /user` (single-tenant API only, see [Deleting data](#backups-and-deleting-data)). 16+ characters. |
-| `KEYAUTH_SERVER_RATE_LIMIT` | `600/60s` | `/v1/siteverify` and `/v1/tickets`, per client IP and per site, per process. |
-| `KEYAUTH_RATE_LIMIT` | `30/60s` | Browser endpoints, per client IP and per user id, per process. |
-| `KEYAUTH_PER_USER` | `1` | Per-user thresholds from the model's calibration. |
-| `KEYAUTH_SERVE_UI` | `0` | `1` serves the single-tenant demo page at `/`. Not needed for `/v1`. |
+| `TEMPO_TOKEN_KEY` | none, required | HMAC key that signs tokens, 32+ characters. Rotating it invalidates tokens in flight (at most 60 s). |
+| `TEMPO_ADMIN_TOKEN` | empty | Bearer token for `DELETE /user` (single-tenant API only, see [Deleting data](#backups-and-deleting-data)). 16+ characters. |
+| `TEMPO_SERVER_RATE_LIMIT` | `600/60s` | `/v1/siteverify` and `/v1/tickets`, per client IP and per site, per process. |
+| `TEMPO_RATE_LIMIT` | `30/60s` | Browser endpoints, per client IP and per user id, per process. |
+| `TEMPO_PER_USER` | `1` | Per-user thresholds from the model's calibration. |
+| `TEMPO_SERVE_UI` | `0` | `1` serves the single-tenant demo page at `/`. Not needed for `/v1`. |
 | `TEMPO_BIND` / `TEMPO_PORT` | `127.0.0.1` / `8000` | Host address and port of the published port. |
 | `TEMPO_UID` / `TEMPO_GID` | your ids | User of the one-off `train` job, so `./checkpoints` is yours. |
 
-Set by the image: `KEYAUTH_ENABLE_V1=1` (compose), `KEYAUTH_CHECKPOINT=/app/checkpoints/model.pt`,
-`KEYAUTH_DB=/app/state/keyauth.db`, `KEYAUTH_HOST=0.0.0.0`, `KEYAUTH_PORT=8000`. The container runs as a non-root user.
+Set by the image: `TEMPO_ENABLE_V1=1` (compose), `TEMPO_CHECKPOINT=/app/checkpoints/model.pt`,
+`TEMPO_DB=/app/state/tempo.db`, `TEMPO_HOST=0.0.0.0`, `TEMPO_PORT=8000`. The container runs as a non-root user.
 
 ## TLS reverse proxy
 
@@ -125,7 +125,7 @@ the per-IP rate limits see the proxy's address; the per-site and per-user limits
 
 ## Backups and deleting data
 
-All state is one SQLite file in the `tempo-state` Docker volume (`/app/state/keyauth.db`): sites (salted secret
+All state is one SQLite file in the `tempo-state` Docker volume (`/app/state/tempo.db`): sites (salted secret
 hashes), enrolled **templates**, enrollment/verification embeddings, and used-token ids. It contains **biometric
 data**: derived from typing rhythm, not raw keystrokes (the server never sees what was typed), but still a
 biometric template of a person.
@@ -143,7 +143,7 @@ biometric template of a person.
 - **Retention:** decide how long you keep the templates of users who left. There is no automatic expiry.
 - **Deleting one user:** the customer's server calls `issue_ticket(secret, user_id, url, reset=True)`. Reset deletes
   the user's template and samples immediately; the new ticket it returns can simply be ignored (it expires after 10
-  minutes). `DELETE /user` with `KEYAUTH_ADMIN_TOKEN` exists too, but it only reaches users of the single-tenant API
+  minutes). `DELETE /user` with `TEMPO_ADMIN_TOKEN` exists too, but it only reaches users of the single-tenant API
   (`app_id` `default`), not users created through `/v1` sites. Disabling a site (`sites disable`) stops it from
   verifying but does not delete its users' data; to erase everything, delete the volume (`docker compose down -v`).
 

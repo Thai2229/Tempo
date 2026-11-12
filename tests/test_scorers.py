@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from keyauth.auth.scorers import (
+from tempo.auth.scorers import (
     MahalanobisScorer,
     ScaledManhattanScorer,
     ScorerState,
@@ -11,10 +11,10 @@ from keyauth.auth.scorers import (
     scorer_threshold,
     timing_vector,
 )
-from keyauth.auth.validation import validate_timings
-from keyauth.baselines import Mahalanobis, ScaledManhattan, timing_vectors
-from keyauth.data import KeystrokeData
-from keyauth.thresholds import PerUserThresholdParams, leave_one_out_scores, user_threshold
+from tempo.auth.validation import validate_timings
+from tempo.baselines import Mahalanobis, ScaledManhattan, timing_vectors
+from tempo.data import KeystrokeData
+from tempo.thresholds import PerUserThresholdParams, leave_one_out_scores, user_threshold
 
 SCORERS = [ScaledManhattanScorer(), MahalanobisScorer(shrinkage=0.5)]
 

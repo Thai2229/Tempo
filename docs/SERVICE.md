@@ -9,15 +9,15 @@ to the shipped CMU-trained model, but the demo caveat in the README stands.
 
 ## Setup
 ```
-export KEYAUTH_ENABLE_V1=1
-export KEYAUTH_TOKEN_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(48))")   # 32+ chars; no default
-python -m keyauth.sites create --name "My shop" --origin https://shop.example   # prints site key + secret ONCE
-python -m keyauth.sites list | disable SITE_ID | enable SITE_ID | rotate-secret SITE_ID
-python -m keyauth.api
+export TEMPO_ENABLE_V1=1
+export TEMPO_TOKEN_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(48))")   # 32+ chars; no default
+python -m tempo.sites create --name "My shop" --origin https://shop.example   # prints site key + secret ONCE
+python -m tempo.sites list | disable SITE_ID | enable SITE_ID | rotate-secret SITE_ID
+python -m tempo.api
 ```
-With `KEYAUTH_ENABLE_V1=1` the app refuses to start if `KEYAUTH_TOKEN_KEY` is missing or shorter than 32 characters.
+With `TEMPO_ENABLE_V1=1` the app refuses to start if `TEMPO_TOKEN_KEY` is missing or shorter than 32 characters.
 With it off (default) `/v1` does not exist and the single-tenant demo API is unchanged. Rotating the signing key
-invalidates all tokens in flight (at most 60 s of them). Run the CLI against the same `KEYAUTH_DB` as the server.
+invalidates all tokens in flight (at most 60 s of them). Run the CLI against the same `TEMPO_DB` as the server.
 
 ## Flow
 1. Enrollment: the customer's server authenticates the user itself, then `POST /v1/tickets {secret, user_id}`
@@ -58,7 +58,7 @@ Decisions:
   Logs carry only a short hash of the id, the site id and the outcome; never secrets, tickets, tokens or timings.
 
 ## Embedding
-Served by the service itself (only when `KEYAUTH_ENABLE_V1=1`): `GET /v1/keyauth.js`, `Content-Type: application/javascript`,
+Served by the service itself (only when `TEMPO_ENABLE_V1=1`): `GET /v1/tempo.js`, `Content-Type: application/javascript`,
 `Cache-Control: public, max-age=300`, `nosniff`, and `Access-Control-Allow-Origin: *` (this one public static file only).
 ```html
 <form method="post" action="/login">
@@ -66,24 +66,24 @@ Served by the service itself (only when `KEYAUTH_ENABLE_V1=1`): `GET /v1/keyauth
   <input id="pw" name="password" type="password" autocomplete="current-password">
   <button>Log in</button>
 </form>
-<script src="https://KEYAUTH-HOST/v1/keyauth.js" defer></script>
+<script src="https://TEMPO-HOST/v1/tempo.js" defer></script>
 <script src="/login-page.js" defer></script>  <!-- same-origin file; no inline script needed -->
 ```
 ```js
 // login-page.js
-const k = keyauth.attach(document.getElementById("pw"), {sitekey: "pk...", userIdField: "#username"});
-// the form now posts an extra hidden field "keyauth_token"; k.destroy() / k.reset() / await k.getToken() also exist
+const k = tempo.attach(document.getElementById("pw"), {sitekey: "pk...", userIdField: "#username"});
+// the form now posts an extra hidden field "tempo_token"; k.destroy() / k.reset() / await k.getToken() also exist
 ```
 Enrollment (the page repeats it `required` times; the ticket comes from your server via `/v1/tickets`):
 ```js
-const {samples, required, done} = await keyauth.enroll(pwInput, {sitekey, ticket, user_id});   // one typed attempt per call
+const {samples, required, done} = await tempo.enroll(pwInput, {sitekey, ticket, user_id});   // one typed attempt per call
 ```
 API:
-- `keyauth.attach(input, {sitekey, endpoint?, tokenField? = "keyauth_token", userIdField?, mode? = "verify"})` returns `{destroy(), reset(), getToken()}`.
+- `tempo.attach(input, {sitekey, endpoint?, tokenField? = "tempo_token", userIdField?, mode? = "verify"})` returns `{destroy(), reset(), getToken()}`.
   `endpoint` defaults to the origin the script was loaded from. `userIdField` is a selector, an element or a function
   returning the opaque id (`[A-Za-z0-9._-]{1,64}`, no emails). `getToken()` resolves to the token string, or `""`; it never rejects.
   Attaching twice to one input replaces the first instance.
-- `keyauth.enroll(input, {sitekey, ticket, user_id, endpoint?})` resolves `{samples, required, done}` (plus `reason` when the
+- `tempo.enroll(input, {sitekey, ticket, user_id, endpoint?})` resolves `{samples, required, done}` (plus `reason` when the
   server restarted enrollment, e.g. `"inconsistent"`) and rejects with an `Error` whose `.code` is the server's error code
   (`invalid_ticket`, `replay`, `length_mismatch`, `rate_limited`, ...) or `network` / `timeout` / `cancelled` / `bad_arguments`.
   Corrections and pastes are ignored: it waits for one clean attempt. Clear the field between samples.
@@ -95,19 +95,19 @@ Behaviour and decisions:
   characters produces no attempt: the form is submitted unchanged with an EMPTY token field.
 - It never reads `input.value`, and never sends or stores the password or key names. Events are anonymized in the browser before
   sending (every key but modifiers and Enter becomes `"x"`, codes become `k0`, `k1`, ...). Same code as the demo page: the logic of
-  `capture.js` is copied into `keyauth.js` between markers by `scripts/sync_keyauth.py`; `pytest` fails if they drift
-  (edit `capture.js`, run `python scripts/sync_keyauth.py`). No `eval`, inline handlers, storage or cookies; the only request is
+  `capture.js` is copied into `tempo.js` between markers by `scripts/sync_tempo.py`; `pytest` fails if they drift
+  (edit `capture.js`, run `python scripts/sync_tempo.py`). No `eval`, inline handlers, storage or cookies; the only request is
   `POST {endpoint}/v1/verify` (and `/v1/enroll`), sent without credentials. Because the Origin must be allowed for the site
-  key (see CORS above), the customer page's CSP needs `script-src` and `connect-src` to include the keyauth host.
-- Fail open or closed is the CUSTOMER's choice. If keyauth is unreachable, errors, or does not answer within 5 s, the form is still
-  submitted with an empty token, so keyauth can never lock a user out of your login. Your server decides what an empty token means:
+  key (see CORS above), the customer page's CSP needs `script-src` and `connect-src` to include the tempo host.
+- Fail open or closed is the CUSTOMER's choice. If tempo is unreachable, errors, or does not answer within 5 s, the form is still
+  submitted with an empty token, so tempo can never lock a user out of your login. Your server decides what an empty token means:
   treating it like `rhythm_match=false` (for example asking for a second factor) is fail-closed; accepting the password alone is fail-open.
   Always do the `siteverify` call on your server, compare the returned `user_id` with the account that logged in, and
   remember the token is single use and lives 60 s.
 - `mode` is accepted for future use; only `"verify"` exists.
 
 ## Token format
-`base64url(payload) "." base64url(HMAC-SHA256(KEYAUTH_TOKEN_KEY, "keyauth-token-v1." + base64url(payload)))`
+`base64url(payload) "." base64url(HMAC-SHA256(TEMPO_TOKEN_KEY, "tempo-token-v1." + base64url(payload)))`
 with payload `{v:1, sid, uid, m (bool), r, iat, exp, jti}`, `exp - iat = 60 s`. There is no algorithm field, so there
 is nothing to downgrade. Single use: `siteverify` inserts `jti` into a primary-keyed table (atomic; expired rows are
 purged on each insert). The token is consumed only when it is genuine, unexpired and minted for the calling site, so

@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from keyauth.events import KeyEvent
-from keyauth.features import TimingSequence, extract_features
+from tempo.events import KeyEvent
+from tempo.features import TimingSequence, extract_features
 
 
 def test_timings_hand_computed():

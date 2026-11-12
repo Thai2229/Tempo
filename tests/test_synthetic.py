@@ -1,8 +1,8 @@
 import numpy as np
 
-from keyauth.events import matches_phrase, pair_events
-from keyauth.features import extract_features
-from keyauth.synthetic import make_typist, simulate_attempt, to_raw_events
+from tempo.events import matches_phrase, pair_events
+from tempo.features import extract_features
+from tempo.synthetic import make_typist, simulate_attempt, to_raw_events
 
 PHRASE = ".tie5Roanl"
 
