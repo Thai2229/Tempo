@@ -60,7 +60,8 @@ Honest reading:
   to 31.8 % but raise false accepts from 13.9 % to 15.0 %. They are on by default, to reject fewer real users.
 - **Pretraining on 7,748 other typists did not help (C11).** An encoder trained on the Aalto typing-test data and
   fine-tuned on CMU was picked on val but tied on test (21.48 % against 21.23 % on the same runs), so it is not
-  shipped. Without CMU fine-tuning it reaches 33 %.
+  shipped. Without CMU fine-tuning it reaches 33 %. Keeping CMU's final Return in the fine-tune (C11b) made val
+  worse (19.84 % against 18.72 %) and test a tie with the current recipe (20.33 % against 21.23 %, inside the noise).
 - **Short enrollment costs accuracy.** 10 enrollment attempts is far fewer than the 200 that Killourhy & Maxion
   (2009) used.
 
