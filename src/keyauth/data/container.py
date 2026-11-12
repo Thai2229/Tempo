@@ -8,6 +8,7 @@ to understand one format.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Sequence
 
 import numpy as np
@@ -145,6 +146,60 @@ class KeystrokeData:
         sessions: Sequence[int] | None = None,
     ) -> "KeystrokeData":
         return cls.from_arrays([s.values for s in sequences], user_ids, sessions)
+
+    def drop_final_key(self) -> "KeystrokeData":
+        """Every attempt without its last keystroke (CMU's Return / the page's Enter, for models trained on Aalto,
+        which never logs the final Enter). The new last keystroke's dd / ud become undefined and are zeroed."""
+        if len(self) == 0 or self.lengths.min() < 3:
+            raise ValueError("dropping the final key needs every attempt to have >= 3 keystrokes")
+        lengths = self.lengths - 1
+        values = self.values.copy()
+        rows = np.arange(len(self))
+        values[rows, lengths] = 0.0
+        values[rows, lengths - 1, 1:] = 0.0
+        key_codes = None
+        if self.key_codes is not None:
+            key_codes = self.key_codes.copy()
+            key_codes[rows, lengths] = 0
+        return KeystrokeData(
+            values=values,
+            lengths=lengths,
+            user_ids=self.user_ids,
+            sessions=self.sessions,
+            sentence_ids=self.sentence_ids,
+            key_codes=key_codes,
+            has_correction=self.has_correction,
+        )
+
+    def save_npz(self, path: str | Path) -> None:
+        """Cache the arrays (e.g. a parsed Aalto subset) so later runs skip parsing. Biometric data: keep it gitignored."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        arrays = {
+            "values": self.values,
+            "lengths": self.lengths,
+            "user_ids": self.user_ids.astype(str),
+            "sessions": self.sessions,
+        }
+        if self.sentence_ids is not None:
+            arrays["sentence_ids"] = self.sentence_ids
+        if self.key_codes is not None:
+            arrays["key_codes"] = self.key_codes
+        if self.has_correction is not None:
+            arrays["has_correction"] = self.has_correction
+        np.savez(path, **arrays)
+
+    @classmethod
+    def load_npz(cls, path: str | Path) -> "KeystrokeData":
+        with np.load(path, allow_pickle=False) as f:
+            optional = {k: f[k] for k in ("sentence_ids", "key_codes", "has_correction") if k in f.files}
+            return cls(
+                values=f["values"],
+                lengths=f["lengths"],
+                user_ids=f["user_ids"].astype(object),
+                sessions=f["sessions"],
+                **optional,
+            )
 
     @staticmethod
     def concat(parts: Sequence["KeystrokeData"]) -> "KeystrokeData":

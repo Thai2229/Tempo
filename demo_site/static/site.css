@@ -1,0 +1,9 @@
+body { font-family: system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #1c2430; }
+main { max-width: 32rem; margin: 2rem auto; padding: 1.5rem; background: #fff; border: 1px solid #dde1e7; border-radius: 8px; }
+label { display: block; margin: 0.75rem 0; }
+input { display: block; width: 100%; padding: 0.5rem; box-sizing: border-box; }
+button { padding: 0.5rem 1rem; }
+.inline { display: inline; }
+.inline button { padding: 0.1rem 0.5rem; }
+.error { color: #b00020; }
+.hint { color: #5b6574; font-size: 0.9rem; }

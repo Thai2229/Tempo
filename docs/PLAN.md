@@ -50,12 +50,11 @@ Goal: a model that works on any password (C10-C11), then a Turnstile-style servi
 Split agreed with the owner: Claude builds C12-C13 and the C10 loader/training scripts; the owner leads the C11
 experiments and their interpretation.
 
-Where we stopped: C10 done (data script, loader, sentence split; stats in docs/RESULTS.md), including the owner's
-decisions on its open questions: keep corrected sentences (flagged per attempt), >= 10 sentences per participant,
-laptop/full keyboards only, CMU's final Enter dropped. Aalto has each sentence once per participant, so the login-style
-test uses CMU. The owner asked Claude to run C11 with the goal of lowering real test error; every choice is made on
-val users only and test is scored once. License: non-commercial only, so C12-C13 stay a portfolio demo unless the
-authors grant permission.
+Where we stopped: C10 and C11 done. C11 found that Aalto pretraining does not lower the CMU login test EER (B2
+21.48% vs 21.23% for the CMU-only recipe on the same runs; Aalto-only 32.98%), so the shipped CMU encoder stays.
+On Aalto itself the model reaches 5.39% test EER on unseen people and sentences; key identity would cut that to
+3.01%, which is the privacy cost of anonymized events. C12 (docs/SERVICE.md) and C13 (keyauth.js, demo_site/) done: the Turnstile-style demo works end to end. License: non-commercial only, so C12-C13 stay a
+portfolio demo unless the authors grant permission.
 
 ## C10: Phrase-independent data (owner: ai-lead)
 - [x] Owner reads the Aalto "136M Keystrokes" dataset license/terms (Dhakal et al., CHI 2018) before any download
@@ -65,25 +64,30 @@ authors grant permission.
 - [x] Keep key identity optional in the loader so C11 can measure what the page's anonymization costs
 
 ## C11: Train and evaluate on unseen phrases (owner: the project owner leads; ai-lead supports)
-- [ ] Data: Aalto defaults from C10 (corrections kept, >=10 sentences, laptop/full keyboards); user-disjoint
+- [x] Data: Aalto defaults from C10 (corrections kept, >=10 sentences, laptop/full keyboards); user-disjoint
       train/val/test; held-out sentences for val/test
-- [ ] Every choice (corrections kept vs dropped, key identity, model size, epochs, temperature) made on VAL users only;
+- [x] Every choice (corrections kept vs dropped, key identity, model size, epochs, temperature) made on VAL users only;
       TEST scored once at the end
-- [ ] Report val AND test EER, mean +/- std over 3+ seeds: (a) Aalto, unseen people on unseen sentences, clean vs
+- [x] Report val AND test EER, mean +/- std over 3+ seeds: (a) Aalto, unseen people on unseen sentences, clean vs
       corrected attempts separately; (b) CMU login test with the Aalto-trained model and no CMU training (enroll 10
       attempts of .tie5Roanl, final Enter dropped), against the current CMU encoder's 21.50% and scaled Manhattan's 22.14%
-- [ ] With vs without key identity (the privacy cost of anonymized events)
-- [ ] Ship whichever wins on the CMU login test EER; engine keeps working via the Embedder protocol
+- [x] With vs without key identity (the privacy cost of anonymized events)
+- [x] Ship whichever wins on the CMU login test EER; engine keeps working via the Embedder protocol
+  - Result: B2 (Aalto pretrain + CMU fine-tune) won val by 0.38 points (18.72 vs 19.10, inside the noise) but tied on
+    test (21.48 vs 21.23 on the same runs). Shipped model kept: no real gain, and an Aalto-derived model would carry
+    the non-commercial license. Details in docs/RESULTS.md (C11).
+  - C11b follow-up: fine-tuning with CMU's Return kept (B2e) was worse on val (19.84 vs 18.72 / 19.10) and tied on
+    test (20.33 vs 21.23, inside the paired noise); not shipped. Details in docs/RESULTS.md (C11b).
 
 ## C12: Multi-site service (owner: backend-developer)
-- [ ] Sites table: site_id (= app_id), public site key, hashed secret, allowed origins; admin CLI to create sites
-- [ ] Signed, single-use, 60 s tokens: the browser never receives "accepted", only a token
-- [ ] POST /v1/siteverify {secret, token} -> {success, user_id, rhythm_match, risk}; customer server decides
-- [ ] Enrollment tickets issued to the customer's server only after it authenticates the user (blocks enrolling a victim)
-- [ ] CORS limited to each site's origins; opaque user ids (no emails)
-- [ ] Failure-path tests: forged / expired / reused token, wrong secret, wrong origin, token for another user
+- [x] Sites table: site_id (= app_id), public site key, hashed secret, allowed origins; admin CLI to create sites
+- [x] Signed, single-use, 60 s tokens: the browser never receives "accepted", only a token
+- [x] POST /v1/siteverify {secret, token} -> {success, user_id, rhythm_match, risk}; customer server decides
+- [x] Enrollment tickets issued to the customer's server only after it authenticates the user (blocks enrolling a victim)
+- [x] CORS limited to each site's origins; opaque user ids (no emails)
+- [x] Failure-path tests: forged / expired / reused token, wrong secret, wrong origin, token for another user
 
 ## C13: Embeddable script + demo customer site (owner: frontend-developer, fullstack for wiring)
-- [ ] keyauth.js: capture.js packaged as keyauth.attach(passwordField, {sitekey}), anonymized events, hidden token field
-- [ ] Separate small demo "customer" site with its own users and hashed passwords that integrates keyauth end to end
-- [ ] Browser e2e test of the integration (like C8's)
+- [x] keyauth.js: capture.js packaged as keyauth.attach(passwordField, {sitekey}), anonymized events, hidden token field
+- [x] Separate small demo "customer" site with its own users and hashed passwords that integrates keyauth end to end
+- [x] Browser e2e test of the integration (like C8's)

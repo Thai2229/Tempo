@@ -92,7 +92,7 @@ def to_timings(body: AttemptIn) -> np.ndarray:
     return validate_timings(values)
 
 
-def build_engine(settings: Settings) -> KeyAuthEngine:
+def build_engine(settings: Settings, store: TemplateStore | None = None) -> KeyAuthEngine:
     from keyauth.auth.embedder import TorchEmbedder  # imports torch, so only when needed
 
     embedder, threshold = TorchEmbedder.from_checkpoint(settings.checkpoint)
@@ -101,7 +101,9 @@ def build_engine(settings: Settings) -> KeyAuthEngine:
         per_user = TorchEmbedder.per_user_params(settings.checkpoint)
         if per_user is None:
             logger.warning("checkpoint has no per-user threshold params, using the global threshold")
-    return KeyAuthEngine(embedder, TemplateStore(settings.db_path), threshold, EngineConfig(), per_user=per_user)
+    if store is None:
+        store = TemplateStore(settings.db_path)
+    return KeyAuthEngine(embedder, store, threshold, EngineConfig(), per_user=per_user)
 
 
 def create_app(engine: KeyAuthEngine | None = None, settings: Settings | None = None) -> FastAPI:
@@ -112,13 +114,22 @@ def create_app(engine: KeyAuthEngine | None = None, settings: Settings | None = 
     if settings.admin_token and len(settings.admin_token) < MIN_ADMIN_TOKEN_CHARS:
         logger.warning("KEYAUTH_ADMIN_TOKEN is shorter than %d characters, use a longer one", MIN_ADMIN_TOKEN_CHARS)
     limiter = SlidingWindowLimiter(settings.rate_limit, settings.rate_window_s)  # tests swap app.state.limiter.clock
+    v1_store = None
+    if settings.enable_v1:
+        from keyauth.api.v1 import check_settings
+
+        check_settings(settings)  # refuse to start without a signing key
+        if engine is not None:
+            v1_store = engine.store
+        else:
+            v1_store = TemplateStore(settings.db_path)  # shared with the engine built later
 
     def get_engine() -> KeyAuthEngine | None:
         with load_lock:
             if not state["attempted"]:
                 state["attempted"] = True
                 try:
-                    state["engine"] = build_engine(settings)
+                    state["engine"] = build_engine(settings, v1_store)
                 except Exception as e:  # missing/corrupt checkpoint, no torch, unwritable db
                     logger.error("model load failed: %s", type(e).__name__)
         return state["engine"]
@@ -269,6 +280,11 @@ def create_app(engine: KeyAuthEngine | None = None, settings: Settings | None = 
             raise ApiError(404, "not_enrolled", "user is not enrolled")
         return {"deleted": True}
 
+    if settings.enable_v1:
+        from keyauth.api.v1 import install
+
+        install(app, settings, v1_store, require_engine, get_engine, limiter)
+
     # ---- demo page (KEYAUTH_SERVE_UI) -------------------------------------
 
     def static_response(name: str) -> Response:
@@ -283,7 +299,15 @@ def create_app(engine: KeyAuthEngine | None = None, settings: Settings | None = 
 
         @app.get("/", include_in_schema=False)
         def index():
+            if settings.landing:
+                return static_response("landing.html")
             return static_response("index.html")
+
+        if settings.landing:
+
+            @app.get("/demo", include_in_schema=False)
+            def demo():
+                return static_response("index.html")
 
         @app.get("/favicon.ico", include_in_schema=False)
         def favicon():

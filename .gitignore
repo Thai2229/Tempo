@@ -10,3 +10,6 @@ venv/
 /checkpoints/
 *.pt
 *.db
+
+# self-hosting secrets and settings (scripts/selfhost_init.sh)
+/.env

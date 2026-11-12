@@ -74,3 +74,32 @@ def split_sentences(
     rng.shuffle(sentences)
     unseen = np.isin(data.sentence_ids, sentences[:n_out])
     return data.subset(~unseen), data.subset(unseen)
+
+
+def split_phrase_independent(
+    data: KeystrokeData,
+    val_frac: float = 0.1,
+    test_frac: float = 0.1,
+    holdout_frac: float = 0.5,
+    min_eval_attempts: int = 6,
+    seed: int = 0,
+) -> tuple[KeystrokeData, KeystrokeData, KeystrokeData]:
+    """(train, val, test) for free-text data (Aalto): unseen people typing unseen sentences.
+
+    Users are split with split_users and sentence ids with split_sentences (same seed). Train keeps
+    train users' seen sentences; val and test keep their users' held-out sentences only, and only users
+    with >= min_eval_attempts of them (enrollment needs n_enroll plus at least one genuine attempt).
+    """
+    train_users, val_users, test_users = split_users(data, val_frac, test_frac, seed)
+    seen, unseen = split_sentences(data, holdout_frac, seed)
+    train = seen.for_users(train_users.users)
+
+    def eval_part(users: KeystrokeData) -> KeystrokeData:
+        part = unseen.for_users(users.users)
+        users, counts = np.unique(part.user_ids.astype(str), return_counts=True)
+        return part.for_users(users[counts >= min_eval_attempts].tolist())
+
+    val, test = eval_part(val_users), eval_part(test_users)
+    if len(val.users) < 2 or len(test.users) < 2:
+        raise ValueError(f"fewer than 2 val or test users have >= {min_eval_attempts} held-out attempts")
+    return train, val, test

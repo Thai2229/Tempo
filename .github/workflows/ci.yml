@@ -65,6 +65,14 @@ jobs:
           curl -fsS http://127.0.0.1:8000/health | grep -q '"model_loaded":false'
           curl -fsS http://127.0.0.1:8000/ | grep -q "keyauth demo"
           docker inspect --format '{{.Config.User}}' keyauth | grep -qx keyauth
+      # Validates docker-compose.yml (no model, no build). A dummy key stands in for the real one in .env.
+      - name: Validate docker-compose.yml
+        run: |
+          KEYAUTH_TOKEN_KEY=dummy-key-for-ci-only-dummy-key-for-ci-only docker compose --profile train config --quiet
+          if env -u KEYAUTH_TOKEN_KEY docker compose config --quiet 2>/dev/null; then
+            echo "compose must refuse to start without KEYAUTH_TOKEN_KEY"
+            exit 1
+          fi
       - name: Container logs
         if: failure()
         run: docker logs keyauth || true

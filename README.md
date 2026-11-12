@@ -1,69 +1,50 @@
-# typing-rhythm-login
+# Tempo
 
-Log in by the rhythm of your typing. `keyauth` is a keystroke-dynamics biometric: it learns how *you* type your
-password (how long you hold each key, how quickly you move to the next) and checks that rhythm at login, as a second
-factor next to the password itself.
+Log in by the rhythm of your typing. Tempo is a keystroke-dynamics biometric: it learns how *you* type your password
+(how long you hold each key, how quickly you move to the next) and checks that rhythm at login, as a second factor
+next to the password.
 
 ![Demo: enrolling with 10 typed samples, then logging in and being accepted](docs/demo.gif)
 
-*The demo page. The GIF was recorded with a scripted browser, not a person: it enrolls with 10 attempts, then
-logs in. Debug mode shows the score against the threshold.*
+*The demo page, recorded with a scripted browser: it enrolls with 10 attempts, then logs in.*
+
+> The Python package, environment variables and script are still named `keyauth` (`import keyauth`, `KEYAUTH_*`).
 
 ## How it works
 
-1. **Capture.** The browser records `keydown` / `keyup` times with `performance.now()` (milliseconds). Before
-   anything is sent, the page replaces every key with an anonymous placeholder (`x`, `k0`, `k1`, ...), so **the
-   server never learns what was typed**. Only the timings are sent. Modifier keys and Enter keep their names.
-2. **Features.** Events are paired into keystrokes, and each keystroke becomes three timings in seconds: `hold`
-   (down to up), `dd` (down to next down) and `ud` (up to next down). This is the layout of the CMU Keystroke
-   Dynamics Benchmark (`src/keyauth/events.py`, `features.py`).
-3. **Embedding.** A small PyTorch encoder (Conv1d, then a bidirectional GRU, then mean and max pooling, then a
-   linear layer) maps one attempt to a point on the unit sphere. It is trained with a supervised contrastive loss so
-   that attempts by the same person land close together (`src/keyauth/model/`). New users need no retraining.
-4. **Enrollment.** The user types the phrase 10 times. The template is the normalized mean of those embeddings.
-   Enrollment restarts if the user's own attempts disagree too much.
-5. **Verification.** Accept if the distance to the template is at most a threshold chosen on validation users.
-   The engine also does the following (`src/keyauth/auth/engine.py`):
-   - rejects replays, since a human never types identical timings twice;
-   - locks the account after repeated failures;
-   - nudges the template toward confident accepts, because rhythm drifts over time.
+1. **Capture.** The browser records key down/up times in milliseconds. It replaces every key with an anonymous
+   placeholder (`x`, `k0`, `k1`, ...) before sending, so **the server never learns what was typed**.
+2. **Features.** Each keystroke becomes three timings in seconds: `hold`, `dd` (down to next down) and `ud` (up to
+   next down), the layout of the CMU Keystroke Dynamics Benchmark.
+3. **Embedding.** A small PyTorch encoder (Conv1d, BiGRU, pooling) maps an attempt to a point on the unit sphere,
+   trained with a supervised contrastive loss. New users need no retraining.
+4. **Enrollment.** The user types the phrase 10 times; the template is the mean embedding.
+5. **Verification.** Accept if the distance to the template is under a threshold chosen on validation users (per
+   user by default, from how consistent their enrollment was). The engine also rejects replays, locks the account
+   after repeated failures, and adapts the template slowly as rhythm drifts.
 
-   Each user gets their own threshold, set from how consistently they typed during enrollment (on by default;
-   `KEYAUTH_PER_USER=0` uses one global threshold). Optionally, the classic scaled-Manhattan and Mahalanobis
-   detectors can replace the encoder.
-
-The engine never sees the password. The app checks the password itself, and keyauth answers only "does the
-rhythm match?".
+The engine never sees the password: the app checks it, and Tempo answers only "does the rhythm match?".
 
 ## Results
 
-Real data: CMU Keystroke Dynamics Benchmark (51 typists, password `.tie5Roanl`).
-
-| Setting | Value |
-|---|---|
-| Enrollment | 10 attempts |
-| Test users | unseen during training |
-| Threshold | one global threshold, picked on val users only |
-| Metric | equal error rate (EER, lower is better), mean ± std over 5 user splits |
+CMU Keystroke Dynamics Benchmark: 51 typists, one password, 10 enrollment attempts, test users unseen in training,
+threshold picked on validation users only. Equal error rate (EER, lower is better), mean ± std over 5 user splits.
 
 | method | val EER | test EER |
 |---|---|---|
 | Scaled Manhattan (classic baseline) | 23.72 ± 1.57 % | 22.14 ± 5.98 % |
 | Mahalanobis (classic baseline) | 22.45 ± 2.62 % | 23.27 ± 4.89 % |
-| Encoder before C6 | 19.93 ± 5.81 % | 28.28 ± 7.14 % |
-| **Encoder, shipped** | 18.76 ± 4.47 % | **21.50 ± 9.30 %** |
+| **Tempo encoder** | 18.76 ± 4.47 % | **21.50 ± 9.30 %** |
 
 Honest reading:
-- **It's a tie, not a win.** The shipped encoder ties the classic detectors, which have been around since 2009.
-- **Splits vary a lot.** With only 8 test users per split, treat any single number as ± 5 points.
-- **Per-user thresholds trade one error for another.** On split seed 0 they cut the false-reject rate from 36.8 %
-  to 31.8 % but raise false accepts from 13.9 % to 15.0 %. They are on by default, to reject fewer real users.
-- **Short enrollment costs accuracy.** 10 enrollment attempts is far fewer than the 200 that Killourhy & Maxion
-  (2009) used.
+- **It's a tie, not a win.** It matches classic detectors from 2009, and with 8 test users per split any single number
+  is about ± 5 points.
+- **Pretraining on 7,748 typists of free text (Aalto) did not help.** After CMU fine-tuning it tied on test
+  (21.48 % vs 21.23 %), so it is not shipped.
+- **10 enrollment attempts is few.** The classic study used 200.
 
-On its own this is not strong enough to authenticate anyone. Use it as a soft signal next to a password.
-
-Details, per-seed tables, the val/test gap investigation and known failure cases: [docs/RESULTS.md](docs/RESULTS.md).
+On its own this cannot authenticate anyone. Use it as a soft signal next to a password. Per-seed tables, the
+val/test gap and failure cases: [docs/RESULTS.md](docs/RESULTS.md).
 
 ## Run it
 
@@ -85,46 +66,47 @@ python -m keyauth.train --data cmu
 python -m keyauth.api
 ```
 
-`get_cmu.py` downloads the CMU benchmark into `data/`. Training takes about 2 minutes on a laptop CPU and writes
-`checkpoints/model.pt`. The last command serves the API and the demo page.
+This downloads the CMU data into `data/`, trains in about 2 minutes on a laptop CPU (writes `checkpoints/model.pt`),
+and serves the API and demo page at http://127.0.0.1:8000/. Set `KEYAUTH_DEBUG_SCORES=1` to see scores in the page.
+All settings are environment variables, listed in [.env.example](.env.example); `KEYAUTH_LANDING=1` serves a public landing page with a live demo at `/` and moves the plain demo page to `/demo`.
 
-Then open http://127.0.0.1:8000/. To see the score and threshold in the page's debug mode, start the server with
-`KEYAUTH_DEBUG_SCORES=1`. All settings are environment variables, listed in [.env.example](.env.example).
+No CMU download? Train on synthetic typists to try the pipeline (its numbers are not CMU numbers):
+`python -m keyauth.train --data synthetic --epochs 5`.
 
-No CMU download? You can train on synthetic typists instead, to try the pipeline. The numbers it reports are not
-CMU numbers.
-
-```bash
-python -m keyauth.train --data synthetic --epochs 5
-```
-
-### Docker
-
-The model is not baked into the image. Train it first (above), then mount `checkpoints/`:
+**Docker.** The model is not baked into the image: train first, then mount `checkpoints/`.
 
 ```bash
-docker build -t keyauth .
+docker build -t tempo .
 ```
 
 ```bash
-docker run --rm -p 8000:8000 -v "$PWD/checkpoints:/app/checkpoints:ro" -v keyauth-state:/app/state keyauth
+docker run --rm -p 8000:8000 -v "$PWD/checkpoints:/app/checkpoints:ro" -v tempo-state:/app/state tempo
 ```
 
-The container runs as a non-root user and keeps its SQLite database in the `keyauth-state` volume.
-
-### API
+## API
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /enroll` `{user_id, events \| timings}` | add one enrollment attempt; returns progress |
-| `POST /verify` `{user_id, events \| timings}` | `{accepted, reason}`; locked accounts get 423 with `Retry-After` |
+| `POST /enroll` `{user_id, events \| timings}` | add one enrollment attempt |
+| `POST /verify` `{user_id, events \| timings}` | `{accepted, reason}`; locked accounts get 423 |
 | `GET /status?user_id=` | enrollment and lock status |
-| `DELETE /user?user_id=` | delete a user's template; always needs `Authorization: Bearer $KEYAUTH_ADMIN_TOKEN` (refused when no token is set) |
+| `DELETE /user?user_id=` | delete a template; needs `Authorization: Bearer $KEYAUTH_ADMIN_TOKEN` |
 | `GET /health` | liveness and whether the model loaded |
 
-Every error has the shape `{"error": {"code", "message"}}`. The full status-code mapping is in
-`src/keyauth/api/__init__.py`. Requests are rate-limited per client IP and per user. Logs carry a hash of
-`user_id` and the outcome, never timings or scores.
+Errors have the shape `{"error": {"code", "message"}}`. Requests are rate-limited. Logs carry a hash of `user_id`
+and the outcome, never timings or scores.
+
+## Use it on other sites (demo)
+
+With `KEYAUTH_ENABLE_V1=1`, Tempo also runs a Turnstile-style service under `/v1`. A customer page adds
+`keyauth.js` and gets back only a signed, single-use 60 s token; the customer's **server** then calls
+`/v1/siteverify` and decides. [`demo_site/`](demo_site/README.md) is a small customer site that does this end to
+end, with a browser test (`scripts/run_integration_e2e.sh`). Details and threat model: [docs/SERVICE.md](docs/SERVICE.md).
+It is a demo, not a hardened production service.
+
+Self-host it: `sh scripts/selfhost_init.sh`, then `docker compose up -d --build` (train a model first with
+`docker compose --profile train run --rm train`). Copy-paste server helpers for Python and Node are in `integrations/`.
+Setup, backups, TLS and your duties for biometric data: [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md). It is a soft signal (~21% EER), not for blocking logins.
 
 ## Tests
 
@@ -132,37 +114,26 @@ Every error has the shape `{"error": {"code", "message"}}`. The full status-code
 python -m pytest
 ```
 
-This includes the JS tests of the capture code, which are skipped without Node. CI runs it on every push and pull
-request (`.github/workflows/ci.yml`). The browser end-to-end check runs against a live server; its usage is in
-`tests/e2e/demo.e2e.mjs`.
+Includes the JS tests (skipped without Node). CI runs them on every push and pull request.
 
-## Project layout
+## Layout
 
 ```
-src/keyauth/
-  events.py, features.py   raw key events -> (hold, dd, ud) timings
-  data/                    CMU and synthetic loaders, user-disjoint splits
-  model/                   RhythmEncoder and losses
-  train.py, evaluate.py    training, EER, checkpoints
-  baselines.py             scaled Manhattan and Mahalanobis
-  thresholds.py            per-user thresholds
-  auth/                    engine, SQLite template store, validation, scorers
-  api/                     FastAPI app
-  web/static/              demo page (plain HTML and JS, no build step)
-scripts/                   get_cmu.py, compare_models.py
-docs/                      PLAN.md (roadmap), RESULTS.md (all numbers)
+src/keyauth/   events, features, data/, model/, train.py, baselines.py, thresholds.py,
+               auth/ (engine, store), api/ (FastAPI, v1 service), sites.py, web/static/ (demo page, keyauth.js)
+demo_site/     example customer site using the /v1 service
+scripts/       get_cmu.py, compare_models.py, run_integration_e2e.sh, selfhost_init.sh
+integrations/  tempo_verify.py, tempo-verify.mjs (customer-server helpers); docker-compose.yml to self-host
+docs/          PLAN.md (roadmap), RESULTS.md (all numbers), SERVICE.md
 ```
 
 ## Privacy
 
-- Keystroke timings are biometric data. The repo never contains user templates, databases or model files
-  (`.gitignore`).
-- The demo page sends anonymized events only.
-- `DELETE /user` removes a user's template and samples. It is an admin action: it needs `KEYAUTH_ADMIN_TOKEN`, so
-  nobody can delete a user and re-enroll as them. In the demo page, "Delete my data" therefore shows "Deleting
-  needs an admin token".
+Keystroke timings are biometric data. The repo never contains user templates, databases or model files. The page
+sends anonymized events only. `DELETE /user` is an admin action, so nobody can delete a user and re-enroll as them.
 
 ## License
 
-MIT. The CMU benchmark data is © Killourhy & Maxion, Carnegie Mellon University. It is downloaded from their site
-and not redistributed here.
+MIT. The CMU benchmark data is © Killourhy & Maxion, Carnegie Mellon University; it is downloaded from their site
+and not redistributed here. The shipped model is trained on CMU data only. The Aalto "136M Keystrokes" data used in
+experiments is non-commercial and is never committed.
