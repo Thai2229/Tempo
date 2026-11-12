@@ -10,8 +10,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from keyauth.data import KeystrokeData, load_aalto, split_sentences, split_users
-from keyauth.data.aalto import AALTO_COLUMNS, main, read_keyboards, read_participant, sentence_id, sentence_timings
+from tempo.data import KeystrokeData, load_aalto, split_sentences, split_users
+from tempo.data.aalto import AALTO_COLUMNS, main, read_keyboards, read_participant, sentence_id, sentence_timings
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "aalto"
 HEADER = "\t".join(AALTO_COLUMNS)

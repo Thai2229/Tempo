@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "keyauth"
+name = "tempo"
 version = "0.1.0"
 description = "Log in by the rhythm of your typing: keystroke-dynamics biometrics with PyTorch"
 requires-python = ">=3.10"
@@ -21,10 +21,10 @@ dev = ["pytest>=7", "httpx2"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"keyauth.web" = ["static/*"]
+"tempo.web" = ["static/*"]
 
 [project.scripts]
-keyauth-demo = "keyauth.api.__main__:main"
+tempo-demo = "tempo.api.__main__:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

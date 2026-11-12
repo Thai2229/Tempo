@@ -11,12 +11,12 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from keyauth.auth import EngineConfig, InvalidTimings, KeyAuthEngine, TemplateStore  # noqa: E402
-from keyauth.auth.embedder import TorchEmbedder  # noqa: E402
-from keyauth.data import KeystrokeData, make_synthetic_dataset, split_phrase_independent, split_users  # noqa: E402
-from keyauth.data.torch_dataset import KeystrokeDataset  # noqa: E402
-from keyauth.model import EncoderConfig, RhythmEncoder  # noqa: E402
-from keyauth.train import (  # noqa: E402
+from tempo.auth import EngineConfig, InvalidTimings, TempoEngine, TemplateStore  # noqa: E402
+from tempo.auth.embedder import TorchEmbedder  # noqa: E402
+from tempo.data import KeystrokeData, make_synthetic_dataset, split_phrase_independent, split_users  # noqa: E402
+from tempo.data.torch_dataset import KeystrokeDataset  # noqa: E402
+from tempo.model import EncoderConfig, RhythmEncoder  # noqa: E402
+from tempo.train import (  # noqa: E402
     TrainConfig,
     aalto_splits,
     embed,
@@ -244,7 +244,7 @@ def test_embedder_rejects_attempts_too_short_without_enter(base_model, tmp_path)
 def test_embedder_refuses_a_key_identity_model(tmp_path):
     model = RhythmEncoder(EncoderConfig(key_vocab=256))
     data = free_text(n_users=3, per_user=3)
-    from keyauth.data import Normalizer
+    from tempo.data import Normalizer
 
     save_checkpoint(tmp_path / "keys.pt", model, Normalizer.fit(data), threshold=1.0, metrics={}, final_enter=False)
     with pytest.raises(ValueError):
@@ -254,7 +254,7 @@ def test_embedder_refuses_a_key_identity_model(tmp_path):
 def test_engine_with_a_no_enter_model_enrolls_verifies_and_length_checks(base_model, tmp_path):
     _, _, _, _, test_data = base_model
     embedder, _ = TorchEmbedder.from_checkpoint(_no_enter_checkpoint(base_model, tmp_path))
-    engine = KeyAuthEngine(embedder, TemplateStore(), 2.0, EngineConfig(enroll_samples=5))
+    engine = TempoEngine(embedder, TemplateStore(), 2.0, EngineConfig(enroll_samples=5))
     rows = np.flatnonzero(test_data.user_ids == test_data.users[0])
     samples = [test_data.values[i, : test_data.lengths[i]].copy() for i in rows[:7]]
     results = [engine.enroll("app", "alice", s) for s in samples[:5]]
@@ -329,7 +329,7 @@ def test_aalto_metrics_splits_clean_and_corrected(compare):
 
 def test_cmu_normalizer_modes(compare):
     data = make_synthetic_dataset(n_users=3, samples_per_user=5)
-    from keyauth.data import Normalizer
+    from tempo.data import Normalizer
 
     given = Normalizer(mean=np.zeros(3), std=np.ones(3))
     assert compare.cmu_normalizer("aalto", given, data) is given
@@ -360,7 +360,7 @@ def test_cli_keep_enter_from_a_no_enter_checkpoint_works_through_the_embedder(ba
     changed[-1, 0] += 0.3  # the Enter's hold now matters
     assert not np.allclose(embedder(changed), expected, atol=1e-4)
 
-    engine = KeyAuthEngine(embedder, TemplateStore(), threshold, EngineConfig(enroll_samples=5))
+    engine = TempoEngine(embedder, TemplateStore(), threshold, EngineConfig(enroll_samples=5))
     rows = np.flatnonzero(test_data.user_ids == test_data.users[0])
     samples = [test_data.values[i, : test_data.lengths[i]].copy() for i in rows[:7]]
     assert [engine.enroll("app", "alice", s) for s in samples[:5]][-1].status == "complete"

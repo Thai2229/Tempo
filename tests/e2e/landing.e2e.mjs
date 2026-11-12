@@ -1,5 +1,5 @@
-// Real-browser check of the landing page (KEYAUTH_LANDING=1). Not part of pytest. Run:
-//   KEYAUTH_LANDING=1 KEYAUTH_DB=/tmp/landing.db KEYAUTH_PORT=8765 python -m keyauth.api &
+// Real-browser check of the landing page (TEMPO_LANDING=1). Not part of pytest. Run:
+//   TEMPO_LANDING=1 TEMPO_DB=/tmp/landing.db TEMPO_PORT=8765 python -m tempo.api &
 //   E2E_URL=http://127.0.0.1:8765 E2E_SHOT=/tmp/landing-shots node tests/e2e/landing.e2e.mjs
 // E2E_SHOT is a directory; it gets landing-{light,dark}-{desktop,mobile}.png. Needs playwright (npm) and its Chromium.
 import { createRequire } from "node:module";

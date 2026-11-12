@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from keyauth.evaluate import (
+from tempo.evaluate import (
     compute_eer,
     far_frr,
     make_template,

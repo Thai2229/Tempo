@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from keyauth.data import load_cmu
+from tempo.data import load_cmu
 
 PAGE_URL = "https://www.cs.cmu.edu/~keystroke/"
 CMU_URL = "https://www.cs.cmu.edu/~keystroke/DSL-StrongPasswordData.csv"
@@ -40,7 +40,7 @@ class DownloadError(RuntimeError):
 def _fetch(url: str, destination: Path) -> None:
     """Stream `url` into `destination`, or raise DownloadError."""
     try:
-        request = urllib.request.Request(url, headers={"User-Agent": "keyauth-get-cmu"})
+        request = urllib.request.Request(url, headers={"User-Agent": "tempo-get-cmu"})
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response, destination.open("wb") as f:
             total = 0
             while True:

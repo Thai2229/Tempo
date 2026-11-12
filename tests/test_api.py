@@ -7,14 +7,14 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from keyauth.api import Settings, create_app  # noqa: E402
-from keyauth.api.ratelimit import SlidingWindowLimiter  # noqa: E402
-from keyauth.api.settings import parse_rate_limit  # noqa: E402
-from keyauth.auth import EngineConfig, KeyAuthEngine, TemplateStore  # noqa: E402
-from keyauth.config import MAX_KEYS  # noqa: E402
-from keyauth.evaluate import compute_eer, verification_scores  # noqa: E402
-from keyauth.features import extract_features  # noqa: E402
-from keyauth.synthetic import make_typist, simulate_attempt, to_raw_events  # noqa: E402
+from tempo.api import Settings, create_app  # noqa: E402
+from tempo.api.ratelimit import SlidingWindowLimiter  # noqa: E402
+from tempo.api.settings import parse_rate_limit  # noqa: E402
+from tempo.auth import EngineConfig, TempoEngine, TemplateStore  # noqa: E402
+from tempo.config import MAX_KEYS  # noqa: E402
+from tempo.evaluate import compute_eer, verification_scores  # noqa: E402
+from tempo.features import extract_features  # noqa: E402
+from tempo.synthetic import make_typist, simulate_attempt, to_raw_events  # noqa: E402
 
 PHRASE = "hunter2!"
 REQUIRED = 10
@@ -70,7 +70,7 @@ def typists():
 
 def build(threshold, clock, max_failures=1000, **settings):
     config = EngineConfig(enroll_samples=REQUIRED, max_failures=max_failures, lockout_s=300.0)
-    engine = KeyAuthEngine(fake_embedder, TemplateStore(), threshold, config, clock=clock)
+    engine = TempoEngine(fake_embedder, TemplateStore(), threshold, config, clock=clock)
     values = {"rate_limit": 10000}
     values.update(settings)
     app = create_app(engine, Settings(**values))
@@ -215,11 +215,11 @@ def test_lockout_with_retry_after(threshold, clock, typists):
 
 
 def test_scorer_error_fails_closed(clock, typists):
-    from keyauth.auth.scorers import ScaledManhattanScorer
+    from tempo.auth.scorers import ScaledManhattanScorer
 
     alice, _, rng = typists
     config = EngineConfig(enroll_samples=REQUIRED)
-    engine = KeyAuthEngine(None, TemplateStore(), 100.0, config, clock=clock, scorer=ScaledManhattanScorer())
+    engine = TempoEngine(None, TemplateStore(), 100.0, config, clock=clock, scorer=ScaledManhattanScorer())
     client = TestClient(create_app(engine, Settings(rate_limit=10000)))
     enroll_all(client, "alice", alice, rng)
     engine.store._conn.execute("UPDATE users SET scorer_state = ?", ("not json",))
@@ -266,7 +266,7 @@ def test_delete_refused_when_no_admin_token_configured(threshold, clock, typists
         headers["Authorization"] = header
     r = client.delete("/user", params={"user_id": "alice"}, headers=headers)
     assert_error(r, 401, "unauthorized")
-    assert "KEYAUTH_ADMIN_TOKEN" in r.json()["error"]["message"]
+    assert "TEMPO_ADMIN_TOKEN" in r.json()["error"]["message"]
     assert client.get("/status", params={"user_id": "alice"}).status_code == 200
 
 
@@ -284,9 +284,9 @@ def test_delete_with_token_configured_rejects_bad_credentials(threshold, clock, 
 
 def test_short_admin_token_warns_but_works(threshold, clock, typists, caplog):
     alice, _, rng = typists
-    with caplog.at_level(logging.WARNING, logger="keyauth.api"):
+    with caplog.at_level(logging.WARNING, logger="tempo.api"):
         client, _ = build(threshold, clock, admin_token="short")
-    assert "KEYAUTH_ADMIN_TOKEN" in caplog.text
+    assert "TEMPO_ADMIN_TOKEN" in caplog.text
     assert "short" not in caplog.text.replace("shorter", "")
     enroll_all(client, "alice", alice, rng)
     assert client.delete("/user", params={"user_id": "alice"}, headers={"Authorization": "Bearer short"}).status_code == 200
@@ -298,20 +298,20 @@ def test_short_admin_token_warns_but_works(threshold, clock, typists, caplog):
 def test_per_user_is_on_by_default_and_env_can_disable():
     assert Settings().per_user is True
     assert Settings.from_env({}).per_user is True
-    assert Settings.from_env({"KEYAUTH_PER_USER": "1"}).per_user is True
+    assert Settings.from_env({"TEMPO_PER_USER": "1"}).per_user is True
     for off in ["0", "false", "no", "off", ""]:
-        assert Settings.from_env({"KEYAUTH_PER_USER": off}).per_user is False
+        assert Settings.from_env({"TEMPO_PER_USER": off}).per_user is False
 
 
 def test_build_engine_falls_back_to_global_threshold_without_params(tmp_path, monkeypatch, caplog):
     pytest.importorskip("torch")
-    from keyauth.api.app import build_engine
-    from keyauth.auth.embedder import TorchEmbedder
+    from tempo.api.app import build_engine
+    from tempo.auth.embedder import TorchEmbedder
 
     monkeypatch.setattr(TorchEmbedder, "from_checkpoint", staticmethod(lambda path: (fake_embedder, 0.5)))
     monkeypatch.setattr(TorchEmbedder, "per_user_params", staticmethod(lambda path: None))
     settings = Settings(checkpoint=str(tmp_path / "old.pt"), db_path=str(tmp_path / "k.db"))
-    with caplog.at_level(logging.WARNING, logger="keyauth.api"):
+    with caplog.at_level(logging.WARNING, logger="tempo.api"):
         engine = build_engine(settings)
     assert engine.per_user is None
     assert engine.threshold == 0.5

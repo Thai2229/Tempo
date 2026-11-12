@@ -1,13 +1,13 @@
-# typing-rhythm-login (keyauth)
+# typing-rhythm-login (tempo)
 
 Log in by the rhythm of your typing: keystroke-dynamics biometrics with PyTorch.
-Package `keyauth` in src/keyauth. Roadmap and status: docs/PLAN.md.
+Package `tempo` in src/tempo. Roadmap and status: docs/PLAN.md.
 
 ## Commands
 - Install: `pip install -e ".[dev,app]"`
 - Tests: `pytest` (must pass before any PR)
-- Train without the dataset: `python -m keyauth.train --data synthetic --epochs 5`
-- Train on CMU: `python -m keyauth.train --data cmu` (needs data/DSL-StrongPasswordData.csv)
+- Train without the dataset: `python -m tempo.train --data synthetic --epochs 5`
+- Train on CMU: `python -m tempo.train --data cmu` (needs data/DSL-StrongPasswordData.csv)
 
 ## Data
 - data/ and checkpoints/ are gitignored, so a cloud session starts without the CMU CSV or a trained model.

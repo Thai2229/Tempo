@@ -5,9 +5,9 @@ import pytest
 torch = pytest.importorskip("torch")
 F = torch.nn.functional
 
-from keyauth.data import Normalizer, make_synthetic_dataset  # noqa: E402
-from keyauth.data.torch_dataset import KeystrokeDataset, PKBatchSampler  # noqa: E402
-from keyauth.model import (  # noqa: E402
+from tempo.data import Normalizer, make_synthetic_dataset  # noqa: E402
+from tempo.data.torch_dataset import KeystrokeDataset, PKBatchSampler  # noqa: E402
+from tempo.model import (  # noqa: E402
     EncoderConfig,
     RhythmEncoder,
     batch_hard_triplet_loss,

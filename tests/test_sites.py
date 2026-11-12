@@ -12,12 +12,12 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from keyauth.api import Settings, create_app  # noqa: E402
-from keyauth.api.tokens import TOKEN_TTL_S, TokenClaims, sign_token, verify_token  # noqa: E402
-from keyauth.api.v1 import TICKET_TTL_S  # noqa: E402
-from keyauth.auth import EngineConfig, KeyAuthEngine, TemplateStore  # noqa: E402
-from keyauth.sites import create_site, main as sites_main, rotate_secret  # noqa: E402
-from keyauth.synthetic import make_typist  # noqa: E402
+from tempo.api import Settings, create_app  # noqa: E402
+from tempo.api.tokens import TOKEN_TTL_S, TokenClaims, sign_token, verify_token  # noqa: E402
+from tempo.api.v1 import TICKET_TTL_S  # noqa: E402
+from tempo.auth import EngineConfig, TempoEngine, TemplateStore  # noqa: E402
+from tempo.sites import create_site, main as sites_main, rotate_secret  # noqa: E402
+from tempo.synthetic import make_typist  # noqa: E402
 
 from test_api import PHRASE, REQUIRED, Clock, assert_error, fake_embedder, threshold, timings_of  # noqa: E402,F401
 
@@ -30,7 +30,7 @@ class Env:
     def __init__(self, threshold, clock, **settings):
         config = EngineConfig(enroll_samples=REQUIRED, max_failures=1000, lockout_s=300.0)
         self.store = TemplateStore()
-        self.engine = KeyAuthEngine(fake_embedder, self.store, threshold, config, clock=clock)
+        self.engine = TempoEngine(fake_embedder, self.store, threshold, config, clock=clock)
         values = {"rate_limit": 10000, "enable_v1": True, "token_key": KEY}
         values.update(settings)
         self.app = create_app(self.engine, Settings(**values))
@@ -190,8 +190,8 @@ def test_alg_confusion_style_tokens(clock):
         assert verify_token(key, token, clock.t) is None, token
     # signed with an empty key / a key derived from public data
     import hashlib, hmac
-    for k in (b"", b"keyauth", ORIGIN_A.encode()):
-        sig = b64(hmac.new(k, b"keyauth-token-v1." + body.encode(), hashlib.sha256).digest())
+    for k in (b"", b"tempo", ORIGIN_A.encode()):
+        sig = b64(hmac.new(k, b"tempo-token-v1." + body.encode(), hashlib.sha256).digest())
         assert verify_token(key, body + "." + sig, clock.t) is None
     # a MAC without the domain prefix is also not accepted
     sig = b64(hmac.new(key, body.encode(), hashlib.sha256).digest())
@@ -204,7 +204,7 @@ def test_malformed_claims_are_rejected_even_when_signed(clock):
 
     def signed(payload):
         text = b64(json.dumps(payload).encode())
-        return text + "." + b64(hmac.new(key, b"keyauth-token-v1." + text.encode(), hashlib.sha256).digest())
+        return text + "." + b64(hmac.new(key, b"tempo-token-v1." + text.encode(), hashlib.sha256).digest())
 
     ok = dict(v=1, sid="s", uid="u", m=True, r="low", iat=clock.t, exp=clock.t + 30, jti="a" * 32)
     assert verify_token(key, signed(ok), clock.t) is not None
@@ -490,16 +490,16 @@ def test_user_ids_are_opaque(env):
 
 @pytest.mark.parametrize("key", [None, "", "short"])
 def test_refuses_to_start_without_a_proper_key(threshold, clock, key):
-    engine = KeyAuthEngine(fake_embedder, TemplateStore(), threshold, clock=clock)
+    engine = TempoEngine(fake_embedder, TemplateStore(), threshold, clock=clock)
     with pytest.raises(ValueError) as e:
         create_app(engine, Settings(enable_v1=True, token_key=key))
-    assert "KEYAUTH_TOKEN_KEY" in str(e.value)
+    assert "TEMPO_TOKEN_KEY" in str(e.value)
     if key:
         assert key not in str(e.value)
 
 
 def test_v1_off_by_default_and_demo_api_unchanged(threshold, clock):
-    engine = KeyAuthEngine(fake_embedder, TemplateStore(), threshold, clock=clock)
+    engine = TempoEngine(fake_embedder, TemplateStore(), threshold, clock=clock)
     client = TestClient(create_app(engine, Settings()))
     assert_error(client.post("/v1/siteverify", json={"secret": "x", "token": "y"}), 404, "not_found")
     assert client.get("/health").status_code == 200
@@ -507,7 +507,7 @@ def test_v1_off_by_default_and_demo_api_unchanged(threshold, clock):
 
 
 def test_settings_from_env():
-    s = Settings.from_env({"KEYAUTH_ENABLE_V1": "1", "KEYAUTH_TOKEN_KEY": KEY, "KEYAUTH_SERVER_RATE_LIMIT": "5/10s"})
+    s = Settings.from_env({"TEMPO_ENABLE_V1": "1", "TEMPO_TOKEN_KEY": KEY, "TEMPO_SERVER_RATE_LIMIT": "5/10s"})
     assert s.enable_v1 and s.token_key == KEY and s.server_rate_limit == 5 and s.server_rate_window_s == 10.0
     assert Settings.from_env({}).enable_v1 is False and Settings.from_env({}).token_key is None
 

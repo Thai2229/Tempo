@@ -49,7 +49,7 @@
     let failures = 0;
     while (failures < 5) {
       try {
-        const r = await keyauth.enroll(pw, { sitekey: sitekey, ticket: t.data.ticket, user_id: t.data.user_id });
+        const r = await tempo.enroll(pw, { sitekey: sitekey, ticket: t.data.ticket, user_id: t.data.user_id });
         failures = 0;
         pw.value = "";
         progress.max = r.required;
@@ -74,8 +74,8 @@
     start.disabled = false;
   }
 
-  if (typeof keyauth === "undefined") {
-    message.textContent = "keyauth.js did not load.";
+  if (typeof tempo === "undefined") {
+    message.textContent = "tempo.js did not load.";
     start.disabled = true;
   } else {
     start.addEventListener("click", run);

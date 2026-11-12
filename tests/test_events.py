@@ -1,6 +1,6 @@
 import pytest
 
-from keyauth.events import KeyEvent, RawEvent, matches_phrase, pair_events, typed_text
+from tempo.events import KeyEvent, RawEvent, matches_phrase, pair_events, typed_text
 
 
 def raw(key, type_, t, code=""):

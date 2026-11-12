@@ -1,15 +1,15 @@
 """HTML for the demo site. Plain strings, everything user-controlled is escaped, and there is no inline script:
-the pages work under script-src 'self' <keyauth origin> (see app.security_headers)."""
+the pages work under script-src 'self' <tempo origin> (see app.security_headers)."""
 
 from __future__ import annotations
 
 from html import escape
 
 
-def layout(title: str, body: str, sitekey: str, keyauth_url: str, scripts: list[str], user: str | None = None) -> str:
+def layout(title: str, body: str, sitekey: str, tempo_url: str, scripts: list[str], user: str | None = None) -> str:
     tags = []
     if scripts:
-        tags.append(f'<script src="{escape(keyauth_url)}/v1/keyauth.js" defer></script>')
+        tags.append(f'<script src="{escape(tempo_url)}/v1/tempo.js" defer></script>')
         for name in scripts:
             tags.append(f'<script src="/static/{escape(name)}" defer></script>')
     nav = ""
@@ -46,14 +46,14 @@ def register_form(message: str | None = None) -> str:
 
 
 def login_form(message: str | None = None) -> str:
-    # The hidden "keyauth-uid" input has no name: it is never posted. The server resolves the account from
+    # The hidden "tempo-uid" input has no name: it is never posted. The server resolves the account from
     # the username and the password, and compares the opaque id inside the token with the account's own.
     return (
         "<h2>Log in</h2>" + error_line(message) +
         '<form id="login-form" method="post" action="/login">'
         '<label>Username <input id="username" name="username" autocomplete="username" required maxlength="64"></label>'
         '<label>Password <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="100"></label>'
-        '<input type="hidden" id="keyauth-uid" value="">'
+        '<input type="hidden" id="tempo-uid" value="">'
         "<button>Log in</button></form>"
         '<p class="hint">Press Enter to submit: the rhythm of your typing includes it.</p>'
         '<p><a href="/register">Create an account</a></p>'
@@ -86,7 +86,7 @@ def account_body(method: str) -> str:
         "<h2>Your account</h2>"
         f'<p id="login-method" data-method="{escape(method)}">{escape(note)}</p>'
         "<h3>Typing rhythm</h3>"
-        "<p>Type your password and press Enter, 10 times. Only timings are sent to keyauth, never the password.</p>"
+        "<p>Type your password and press Enter, 10 times. Only timings are sent to tempo, never the password.</p>"
         '<button id="start-enroll" type="button">Enroll my typing rhythm</button>'
         '<div id="enroll-area" hidden>'
         '<label>Password <input id="enroll-pw" type="password" autocomplete="current-password" maxlength="100"></label>'

@@ -76,7 +76,7 @@ mean test EER, which is the rule in docs/PLAN.md. Read that result with these ca
 
 Old checkpoint re-scored on split seed 0: val 17.50, test 28.52 (this confirms the "before" model).
 
-Shipped checkpoint (split seed 0, `python -m keyauth.train --data cmu`): val 13.56, test 21.84, threshold 0.7545,
+Shipped checkpoint (split seed 0, `python -m tempo.train --data cmu`): val 13.56, test 21.84, threshold 0.7545,
 at which test FAR is 14.29% and FRR is 37.79%. That imbalance shows the threshold does not transfer exactly between
 small user groups.
 
@@ -141,7 +141,7 @@ noise. Soft-margin batch-hard was also tried and dropped: holdout 36 to 37%, no 
 
 ## Can the classic detectors run in the engine?
 
-Not as they are. The Embedder protocol (`Embedder` in src/keyauth/auth/engine.py) maps one attempt to one unit vector
+Not as they are. The Embedder protocol (`Embedder` in src/tempo/auth/engine.py) maps one attempt to one unit vector
 with no knowledge of the user, and the engine scores L2 distance to a mean template. Scaled Manhattan and Mahalanobis
 need per-user spread statistics at scoring time. Forcing classic features through a stateless embedding loses most of
 their accuracy:
@@ -158,10 +158,10 @@ their accuracy:
 The encoder shipped, so the engine needed no change. Preferring a classic detector later would need a per-user
 scoring path in the engine, which is a design decision left open (see docs/PLAN.md).
 
-C6b adds that scoring path's model half in src/keyauth/auth/scorers.py: `timing_vector` (one validated attempt ->
+C6b adds that scoring path's model half in src/tempo/auth/scorers.py: `timing_vector` (one validated attempt ->
 raw timing vector), `ScaledManhattanScorer` / `MahalanobisScorer` with `fit(enroll) -> ScorerState` and
 `score(state, vector) -> float`, and JSON (de)serialization of the state so the store can persist it. Scores are
-identical to keyauth.baselines. The engine wiring is not done yet.
+identical to tempo.baselines. The engine wiring is not done yet.
 
 ## C6b: per-user thresholds
 
@@ -174,7 +174,7 @@ encoder trades FRR for FAR: test FRR 36.76% -> 31.76%, FAR 13.93% -> 15.00%. The
 a global offset (the val threshold is too strict for these 8 test users), and a rule built from enrollment
 attempts cannot see that.
 
-### The rule (src/keyauth/thresholds.py)
+### The rule (src/tempo/thresholds.py)
 
 For one user, from their own N = 10 enrollment attempts only:
 
@@ -284,7 +284,7 @@ A fully proportional threshold (weight 1) is clearly worse for the encoder (test
 
 ### Shipped checkpoint
 
-`python -m keyauth.train --data cmu` now also fits the rule on val users and writes it to the checkpoint and to
+`python -m tempo.train --data cmu` now also fits the rule on val users and writes it to the checkpoint and to
 model.json under `"per_user_threshold"`: weight 0.25, scale 1.5727, reference spread 0.4822 (global-equivalent
 threshold 0.7584, close to the global val threshold 0.7568). Checkpoints without that key still load
 (`PerUserThresholdParams.from_meta` returns None, and the engine keeps its global threshold).
@@ -326,7 +326,7 @@ python scripts/compare_models.py dev         # encoder variants, development use
 python scripts/compare_models.py stateless   # classic features through a stateless embedding
 python scripts/compare_models.py final --before-checkpoint PATH/TO/OLD/model.pt   # reads test users
 python scripts/compare_models.py table       # prints every table on this page
-python -m keyauth.train --data cmu           # writes the shipped checkpoints/model.pt and model.json
+python -m tempo.train --data cmu           # writes the shipped checkpoints/model.pt and model.json
 python scripts/compare_models.py engine      # shipped checkpoint through the engine, val users (latency, refusals)
 python scripts/compare_models.py peruser     # C6b per-user thresholds, rule fitted on val, reads test users
 ```
@@ -360,7 +360,7 @@ literal newline (the row spans two lines; the loader re-joins it) or a literal t
 as malformed). TEST_SECTION_ID is unique per presentation, so the sentence id is a hash of SENTENCE. metadata_participants.txt
 has one row per participant, including KEYBOARD_TYPE (laptop / full / small / on-screen) and LAYOUT.
 
-**Loader** (`load_aalto`, src/keyauth/data/aalto.py): each sentence goes through events.pair_events and
+**Loader** (`load_aalto`, src/tempo/data/aalto.py): each sentence goes through events.pair_events and
 features.extract_features, like live capture (modifiers dropped, ordered by press time, hold <= 2 s, dd <= 5 s).
 Defaults (owner decisions, C10): keep corrected sentences, with the editing keys (Backspace, Delete, arrows,
 Home/End, ...) as ordinary keystrokes, because people make mistakes typing passwords too; each sentence carries
@@ -369,7 +369,7 @@ KEYBOARD_TYPE is laptop or full (small physical and on-screen keyboards excluded
 metadata dropped). Uncorrected typos are kept; 10 to 128 keystrokes; at least 10 kept sentences per participant.
 Key codes only with `with_keys=True`. `corrections="drop"` and `keyboards=None` give the other columns below.
 
-**Statistics on the 10,000-participant subset** (`python -m keyauth.data.aalto data/aalto [options]`):
+**Statistics on the 10,000-participant subset** (`python -m tempo.data.aalto data/aalto [options]`):
 
 | | default (keep corrections, >= 10 sentences, laptop + full) | drop corrected, >= 5 sentences, all keyboards | drop corrected, >= 10 sentences, all keyboards | keep corrections, >= 10 sentences, all keyboards |
 |---|---|---|---|---|
@@ -555,7 +555,7 @@ does not beat the current model: 21.48 against 21.23 on the same 15 runs, 21.87 
 26.46 against 22.61 on split seed 0, the split the shipped checkpoint is trained on. So nothing was written to
 model.pt and no model_c6.pt copy was needed.
 
-What exists for later use (all gitignored): `python -m keyauth.train --data cmu --init checkpoints/c11/aalto_t0.05_e30_s0.pt
+What exists for later use (all gitignored): `python -m tempo.train --data cmu --init checkpoints/c11/aalto_t0.05_e30_s0.pt
 --epochs 15 --lr 1e-3 --out checkpoints/c11/model_b2_split0.pt` writes the B2 model for split seed 0 the way train.py
 writes model.pt: weights, normalizer, val threshold, per-user threshold params (weight 0.25, scale 1.5624), and
 `"final_enter": false`. It reproduces the split-0 replicate-0 run exactly (val 15.35, test 28.29). Loaded through
@@ -566,7 +566,7 @@ and 40 of 280 impostor attempts accepted, 1 attempt refused by validation, no en
 
 ### Code
 
-- `python -m keyauth.train --data aalto` (cache `--aalto-cache`, `--corrections keep|drop`, `--keys`, `--width`,
+- `python -m tempo.train --data aalto` (cache `--aalto-cache`, `--corrections keep|drop`, `--keys`, `--width`,
   `--layers`, `--temperature`, `--lr`, `--p`, `--k`; `--n-enroll` defaults to 5 for Aalto) and `--init CHECKPOINT`
   for fine-tuning (`--normalizer fit|init`; `--epochs 0` only calibrates the threshold). `--init` inherits
   `final_enter`, so CMU's Return is dropped when fine-tuning an Aalto model.
@@ -718,7 +718,7 @@ replicate-averaged values (%); FAR / FRR at each split's val threshold**
 **Nothing. checkpoints/model.pt is unchanged (the C6 encoder, md5 27dbad32...).** Both conditions failed. B2e was not
 selected on val (19.84, the worst of the three). Its 0.91-point test gain over B3 is inside the paired noise
 (+/- 3.25) and comes from one split. An Aalto-derived model would also inherit Aalto's non-commercial license. If a
-later milestone ships one anyway: `python -m keyauth.train --data cmu --init checkpoints/c11/aalto_t0.05_e30_s0.pt
+later milestone ships one anyway: `python -m tempo.train --data cmu --init checkpoints/c11/aalto_t0.05_e30_s0.pt
 --keep-enter --epochs 30 --lr 1e-3` writes it with `"final_enter": true`, so the API embeds the full attempt.
 
 ### Caveats
@@ -736,7 +736,7 @@ later milestone ships one anyway: `python -m keyauth.train --data cmu --init che
 
 ### Code and compute
 
-- `python -m keyauth.train --init CKPT --keep-enter`: fine-tune with the final Enter / Return kept, even if the init
+- `python -m tempo.train --init CKPT --keep-enter`: fine-tune with the final Enter / Return kept, even if the init
   model was trained without it. The checkpoint gets `final_enter: true`. It is refused without `--init`, and with
   `--data aalto` (no Enter to keep).
 - `scripts/compare_models.py c11 b2 --keep-enter [--normalizer aalto|cmu]` -> c11/b2e.json, checkpoints in

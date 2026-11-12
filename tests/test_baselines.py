@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-from keyauth.baselines import Mahalanobis, ScaledManhattan, detector_scores, timing_vectors
-from keyauth.data import KeystrokeData
-from keyauth.data.cmu import cmu_timing_columns
-from keyauth.evaluate import summarize, verification_scores
+from tempo.baselines import Mahalanobis, ScaledManhattan, detector_scores, timing_vectors
+from tempo.data import KeystrokeData
+from tempo.data.cmu import cmu_timing_columns
+from tempo.evaluate import summarize, verification_scores
 
 
 def make_data(rng: np.random.Generator, n_users: int = 3, per_user: int = 30, noise: float = 0.002) -> KeystrokeData:

@@ -3,8 +3,8 @@ import json
 import numpy as np
 import pytest
 
-from keyauth.evaluate import Scores, make_template, summarize
-from keyauth.thresholds import (
+from tempo.evaluate import Scores, make_template, summarize
+from tempo.thresholds import (
     PerUserThresholdParams,
     embedding_loo_scores,
     embedding_threshold,

@@ -1,10 +1,10 @@
 """The demo "customer" site. Pages: /register, /login, /account. Policy and design notes: demo_site/README.md.
 
 Login order (the order matters, and tests/test_demo_site.py pins it):
-  1. check the password hash (scrypt, constant time); wrong or unknown user -> one generic error, keyauth is NOT called
-  2. only then call keyauth /v1/siteverify with the token from the form
+  1. check the password hash (scrypt, constant time); wrong or unknown user -> one generic error, tempo is NOT called
+  2. only then call tempo /v1/siteverify with the token from the form
   3. policy (the customer's choice, see decide_login): match for THIS account -> in; no match -> second step;
-     no token / keyauth unreachable -> fail-open to password only, flagged in the log (or second step if fail_mode=closed)
+     no token / tempo unreachable -> fail-open to password only, flagged in the log (or second step if fail_mode=closed)
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 
 from demo_site import pages
 from demo_site.config import SiteConfig
-from demo_site.keyauth_client import KeyauthClient, KeyauthLike
+from demo_site.tempo_client import TempoClient, TempoLike
 from demo_site.store import Session, Store, User, check_password, hash_password
 
 logger = logging.getLogger("demo_site")
@@ -33,7 +33,7 @@ COOKIE = "demo_session"
 ACTIVE_TTL_S = 3600.0
 PENDING_TTL_S = 600.0
 MAX_CODE_ATTEMPTS = 5
-MAX_TOKEN_CHARS = 2048  # keyauth's own limit; longer is garbage, not "keyauth is down"
+MAX_TOKEN_CHARS = 2048  # tempo's own limit; longer is garbage, not "tempo is down"
 USERNAME_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._@+-")
 GENERIC_LOGIN_ERROR = "Invalid username or password."
 
@@ -49,16 +49,16 @@ class Decision:
 
 
 def decide_login(fail_mode: str, token: str, verdict: dict[str, Any] | None, account_opaque_id: str) -> Decision:
-    """The policy. Called only AFTER the password was verified. This is the customer's choice, not keyauth's.
+    """The policy. Called only AFTER the password was verified. This is the customer's choice, not tempo's.
 
-    token   what the form carried ("" = keyauth.js did not run, was blocked, or keyauth did not answer in the browser)
+    token   what the form carried ("" = tempo.js did not run, was blocked, or tempo did not answer in the browser)
     verdict the parsed /v1/siteverify answer, or None when that call could not be completed (only used with a token)
     """
     unavailable = ""
     if token == "":
         unavailable = "no_token"
     elif len(token) <= MAX_TOKEN_CHARS and verdict is None:
-        unavailable = "keyauth_unreachable"
+        unavailable = "tempo_unreachable"
     if unavailable != "":
         if fail_mode == "closed":
             return Decision(SECOND_STEP, unavailable + "_fail_closed")
@@ -73,7 +73,7 @@ def decide_login(fail_mode: str, token: str, verdict: dict[str, Any] | None, acc
 
 
 def security_headers(config: SiteConfig) -> dict[str, str]:
-    ka = config.keyauth_url
+    ka = config.tempo_url
     csp = (
         f"default-src 'none'; script-src 'self' {ka}; connect-src 'self' {ka}; style-src 'self'; img-src 'self'; "
         "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
@@ -103,9 +103,9 @@ def valid_password(password: str) -> bool:
     return 8 <= len(password) <= 100
 
 
-def create_app(config: SiteConfig, client: KeyauthLike | None = None, store: Store | None = None) -> FastAPI:
+def create_app(config: SiteConfig, client: TempoLike | None = None, store: Store | None = None) -> FastAPI:
     if client is None:
-        client = KeyauthClient(config.keyauth_url, config.site_secret)
+        client = TempoClient(config.tempo_url, config.site_secret)
     if store is None:
         store = Store(config.db_path)
     headers = security_headers(config)
@@ -121,7 +121,7 @@ def create_app(config: SiteConfig, client: KeyauthLike | None = None, store: Sto
         return response
 
     def html(title: str, body: str, scripts: list[str], user: str | None = None, status: int = 200) -> HTMLResponse:
-        return HTMLResponse(pages.layout(title, body, config.site_key, config.keyauth_url, scripts, user), status_code=status)
+        return HTMLResponse(pages.layout(title, body, config.site_key, config.tempo_url, scripts, user), status_code=status)
 
     def set_cookie(response: Response, sid: str, ttl_s: float) -> None:
         response.set_cookie(COOKIE, sid, max_age=int(ttl_s), path="/", httponly=True, samesite="lax", secure=config.secure_cookie)
@@ -175,8 +175,8 @@ def create_app(config: SiteConfig, client: KeyauthLike | None = None, store: Sto
 
     @app.post("/login/identify")
     async def identify(request: Request):
-        """Which opaque id should keyauth.js ask about? Same answer shape for every username, so this does not reveal
-        whether the account exists: unknown names get a stable stand-in id that keyauth treats as "unknown user"."""
+        """Which opaque id should tempo.js ask about? Same answer shape for every username, so this does not reveal
+        whether the account exists: unknown names get a stable stand-in id that tempo treats as "unknown user"."""
         try:
             data = await request.json()
         except ValueError:
@@ -197,14 +197,14 @@ def create_app(config: SiteConfig, client: KeyauthLike | None = None, store: Sto
         fields = form_fields(await request.body())
         username = fields.get("username", "").strip()
         password = fields.get("password", "")
-        token = fields.get("keyauth_token", "")
+        token = fields.get("tempo_token", "")
         user = store.get_user(username)
         stored = dummy_hash
         if user is not None:
             stored = user.password_hash
         password_ok = check_password(password, stored)  # always runs scrypt, also for unknown names
         if user is None or not password_ok:
-            # keyauth is NOT contacted: a wrong password must never consume or reveal anything
+            # tempo is NOT contacted: a wrong password must never consume or reveal anything
             logger.info("login outcome=bad_credentials")
             return html("Log in", pages.login_form(GENERIC_LOGIN_ERROR), ["login.js"], status=401)
         verdict = None
@@ -280,7 +280,7 @@ def create_app(config: SiteConfig, client: KeyauthLike | None = None, store: Sto
         if status == 409:
             return JSONResponse({"error": "already_enrolled"}, status_code=409)
         logger.error("ticket failed http_status=%s", status)
-        return JSONResponse({"error": "keyauth_unavailable"}, status_code=502)
+        return JSONResponse({"error": "tempo_unavailable"}, status_code=502)
 
     @app.post("/logout")
     def logout(request: Request):

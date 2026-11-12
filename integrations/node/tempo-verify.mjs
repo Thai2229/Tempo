@@ -1,7 +1,7 @@
 // Tempo server-side helpers for your own backend. One file, no dependencies, Node 18+ (global fetch).
 //
 //   import { verify, issueTicket } from "./tempo-verify.mjs";
-//   const r = await verify(process.env.TEMPO_SECRET, req.body.keyauth_token, "https://tempo.example.com");
+//   const r = await verify(process.env.TEMPO_SECRET, req.body.tempo_token, "https://tempo.example.com");
 //   if (r.success && r.user_id === account.tempoId && r.rhythm_match) { /* rhythm looks right */ }
 //   else { /* your policy: second factor, or let the password alone through */ }
 //

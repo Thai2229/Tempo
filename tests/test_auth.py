@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-from keyauth.auth import EngineConfig, InvalidTimings, KeyAuthEngine, TemplateStore, validate_timings
-from keyauth.evaluate import compute_eer, verification_scores
-from keyauth.features import extract_features
-from keyauth.synthetic import make_typist, simulate_attempt
+from tempo.auth import EngineConfig, InvalidTimings, TempoEngine, TemplateStore, validate_timings
+from tempo.evaluate import compute_eer, verification_scores
+from tempo.features import extract_features
+from tempo.synthetic import make_typist, simulate_attempt
 
 PHRASE = "hunter2!"
 
@@ -62,7 +62,7 @@ def clock():
 @pytest.fixture
 def engine(threshold, clock):
     config = EngineConfig(enroll_samples=10, max_failures=1000)
-    return KeyAuthEngine(fake_embedder, TemplateStore(), threshold, config, clock=clock)
+    return TempoEngine(fake_embedder, TemplateStore(), threshold, config, clock=clock)
 
 
 @pytest.fixture
@@ -141,7 +141,7 @@ def test_enrollment_rejects_replay(engine, typists):
 
 def test_enrollment_restarts_when_inconsistent(typists):
     alice, _, rng = typists
-    eng = KeyAuthEngine(RandomEmbedder(), TemplateStore(), threshold=0.5)
+    eng = TempoEngine(RandomEmbedder(), TemplateStore(), threshold=0.5)
     results = [eng.enroll("app", "alice", a) for a in attempts(alice, rng, 10)]
     assert results[-1].status == "rejected" and results[-1].reason == "inconsistent"
     assert eng.status("app", "alice") == {
@@ -206,7 +206,7 @@ def test_verify_length_mismatch(engine, typists):
 
 def test_lockout_and_recovery(threshold, clock, typists):
     alice, _, rng = typists
-    eng = KeyAuthEngine(
+    eng = TempoEngine(
         fake_embedder, TemplateStore(), threshold, EngineConfig(max_failures=3, lockout_s=60), clock=clock
     )
     enroll_fully(eng, "app", "alice", alice, rng)
@@ -224,7 +224,7 @@ def test_lockout_and_recovery(threshold, clock, typists):
 
 def test_adaptation_moves_template(threshold, typists):
     alice, _, rng = typists
-    eng = KeyAuthEngine(fake_embedder, TemplateStore(), threshold, EngineConfig(adapt_max_ratio=1.0, max_failures=1000))
+    eng = TempoEngine(fake_embedder, TemplateStore(), threshold, EngineConfig(adapt_max_ratio=1.0, max_failures=1000))
     enroll_fully(eng, "app", "alice", alice, rng)
     before = eng.store.get_user("app", "alice").template
     assert any(eng.verify("app", "alice", a).accepted for a in attempts(alice, rng, 10))
@@ -235,7 +235,7 @@ def test_adaptation_moves_template(threshold, typists):
 
 def test_adaptation_can_be_disabled(threshold, typists):
     alice, _, rng = typists
-    eng = KeyAuthEngine(fake_embedder, TemplateStore(), threshold, EngineConfig(adapt=False, max_failures=1000))
+    eng = TempoEngine(fake_embedder, TemplateStore(), threshold, EngineConfig(adapt=False, max_failures=1000))
     enroll_fully(eng, "app", "alice", alice, rng)
     before = eng.store.get_user("app", "alice").template
     for a in attempts(alice, rng, 10):
@@ -245,7 +245,7 @@ def test_adaptation_can_be_disabled(threshold, typists):
 
 def test_history_is_trimmed(threshold, typists):
     alice, _, rng = typists
-    eng = KeyAuthEngine(fake_embedder, TemplateStore(), threshold, EngineConfig(history_size=3, max_failures=1000))
+    eng = TempoEngine(fake_embedder, TemplateStore(), threshold, EngineConfig(history_size=3, max_failures=1000))
     enroll_fully(eng, "app", "alice", alice, rng)
     accepted = sum(eng.verify("app", "alice", a).accepted for a in attempts(alice, rng, 20))
     assert accepted > 3
@@ -276,9 +276,9 @@ def test_delete_user(engine, typists):
 
 def test_store_persists_to_disk(tmp_path, threshold, typists):
     alice, _, rng = typists
-    path = tmp_path / "keyauth.db"
+    path = tmp_path / "tempo.db"
     store = TemplateStore(path)
-    eng = KeyAuthEngine(fake_embedder, store, threshold)
+    eng = TempoEngine(fake_embedder, store, threshold)
     enroll_fully(eng, "app", "alice", alice, rng)
     template = store.get_user("app", "alice").template
     store.close()

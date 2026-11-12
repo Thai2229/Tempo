@@ -34,13 +34,13 @@ from typing import Callable
 import numpy as np
 import torch
 
-from keyauth.auth import EngineConfig, InvalidTimings, KeyAuthEngine, TemplateStore
-from keyauth.auth.embedder import TorchEmbedder
-from keyauth.auth.scorers import MahalanobisScorer, ScaledManhattanScorer, UserScorer, enrollment_loo_scores
-from keyauth.baselines import Detector, Mahalanobis, ScaledManhattan, detector_scores, timing_vectors
-from keyauth.data import KeystrokeData, Normalizer, load_cmu, split_users
-from keyauth.data.preprocess import EPS_S, valid_mask
-from keyauth.evaluate import (
+from tempo.auth import EngineConfig, InvalidTimings, TempoEngine, TemplateStore
+from tempo.auth.embedder import TorchEmbedder
+from tempo.auth.scorers import MahalanobisScorer, ScaledManhattanScorer, UserScorer, enrollment_loo_scores
+from tempo.baselines import Detector, Mahalanobis, ScaledManhattan, detector_scores, timing_vectors
+from tempo.data import KeystrokeData, Normalizer, load_cmu, split_users
+from tempo.data.preprocess import EPS_S, valid_mask
+from tempo.evaluate import (
     Scores,
     compute_eer,
     far_frr,
@@ -49,8 +49,8 @@ from keyauth.evaluate import (
     summarize,
     verification_scores,
 )
-from keyauth.model import EncoderConfig, RhythmEncoder
-from keyauth.thresholds import (
+from tempo.model import EncoderConfig, RhythmEncoder
+from tempo.thresholds import (
     WEIGHT_GRID,
     PerUserThresholdParams,
     embedding_loo_scores,
@@ -59,7 +59,7 @@ from keyauth.thresholds import (
     normalize_scores,
     references,
 )
-from keyauth.train import (
+from tempo.train import (
     AALTO_N_ENROLL,
     KEY_VOCAB,
     TrainConfig,
@@ -304,7 +304,7 @@ def cmd_engine(args: argparse.Namespace) -> None:
         rows = np.flatnonzero(val_data.user_ids == user)
         return [val_data.values[i, : val_data.lengths[i]] for i in rows]
 
-    def attempt_login(engine: KeyAuthEngine, user: str, timings: np.ndarray, kind: str) -> None:
+    def attempt_login(engine: TempoEngine, user: str, timings: np.ndarray, kind: str) -> None:
         start = time.perf_counter()
         try:
             result = engine.verify("app", user, timings)
@@ -317,7 +317,7 @@ def cmd_engine(args: argparse.Namespace) -> None:
 
     for user in val_data.users:
         config = EngineConfig(enroll_samples=N_ENROLL, max_failures=10**9, adapt=False)
-        engine = KeyAuthEngine(embedder, TemplateStore(), threshold, config)
+        engine = TempoEngine(embedder, TemplateStore(), threshold, config)
         enrolled = [engine.enroll("app", user, a) for a in attempts(user)[:N_ENROLL]]
         if enrolled[-1].status != "complete":
             counts["enroll_failed"] += 1

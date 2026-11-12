@@ -2,7 +2,7 @@
 
     from tempo_verify import verify, issue_ticket
 
-    result = verify(os.environ["TEMPO_SECRET"], request.form.get("keyauth_token", ""), "https://tempo.example.com")
+    result = verify(os.environ["TEMPO_SECRET"], request.form.get("tempo_token", ""), "https://tempo.example.com")
     if result.success and result.user_id == account.tempo_id and result.rhythm_match:
         ...  # rhythm looks right
     else:
@@ -40,7 +40,7 @@ class VerifyResult:
 @dataclass(frozen=True)
 class TicketResult:
     success: bool
-    ticket: str | None = None  # hand this to the page for keyauth.enroll(...)
+    ticket: str | None = None  # hand this to the page for tempo.enroll(...)
     expires_in: int | None = None
     reason: str | None = None  # "already_enrolled" (pass reset=True), "unauthorized", "unreachable", ...
 

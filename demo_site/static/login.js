@@ -1,11 +1,11 @@
 // Login page behaviour. A same-origin file, so no inline script is needed under the strict CSP.
-// 1. when the username is entered, ask OUR server which opaque id keyauth should use (same answer shape for every name)
-// 2. attach keyauth to the password field; it adds the hidden "keyauth_token" field to the form
+// 1. when the username is entered, ask OUR server which opaque id tempo should use (same answer shape for every name)
+// 2. attach tempo to the password field; it adds the hidden "tempo_token" field to the form
 (function () {
   "use strict";
   const sitekey = document.body.dataset.sitekey;
   const username = document.getElementById("username");
-  const uid = document.getElementById("keyauth-uid");
+  const uid = document.getElementById("tempo-uid");
   const password = document.getElementById("password");
 
   async function identify() {
@@ -34,8 +34,8 @@
   if (username.value !== "") {
     identify();
   }
-  if (typeof keyauth !== "undefined") {
-    keyauth.attach(password, { sitekey: sitekey, userIdField: "#keyauth-uid" });
+  if (typeof tempo !== "undefined") {
+    tempo.attach(password, { sitekey: sitekey, userIdField: "#tempo-uid" });
   }
-  // if keyauth.js did not load, the form still works: the server sees an empty token and applies its policy
+  // if tempo.js did not load, the form still works: the server sees an empty token and applies its policy
 })();

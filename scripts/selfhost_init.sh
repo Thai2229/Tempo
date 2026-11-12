@@ -34,8 +34,8 @@ add() {
     fi
 }
 
-add KEYAUTH_TOKEN_KEY "$(gen)"
-add KEYAUTH_ADMIN_TOKEN "$(gen)"
+add TEMPO_TOKEN_KEY "$(gen)"
+add TEMPO_ADMIN_TOKEN "$(gen)"
 add TEMPO_UID "$(id -u)"
 add TEMPO_GID "$(id -g)"
 
