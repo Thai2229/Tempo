@@ -1,0 +1,57 @@
+# Self-hosting Tempo (the /v1 service). Quickstart: docs/SELF_HOSTING.md
+#
+#   sh scripts/selfhost_init.sh        # writes .env with generated secrets (never overwrites)
+#   docker compose --profile train run --rm train     # one-off: download CMU, train into ./checkpoints (needs network)
+#   docker compose up -d --build
+#
+# No secrets live in this file. KEYAUTH_TOKEN_KEY has no default on purpose: compose stops with a message if it is unset.
+name: tempo
+
+services:
+  tempo:
+    build: .
+    image: tempo:local
+    restart: unless-stopped
+    environment:
+      KEYAUTH_ENABLE_V1: "1"
+      KEYAUTH_TOKEN_KEY: ${KEYAUTH_TOKEN_KEY:?KEYAUTH_TOKEN_KEY is not set. Run "sh scripts/selfhost_init.sh" (creates .env) or export it (32+ characters).}
+      KEYAUTH_ADMIN_TOKEN: ${KEYAUTH_ADMIN_TOKEN:-}
+      KEYAUTH_SERVE_UI: ${KEYAUTH_SERVE_UI:-0}
+      KEYAUTH_SERVER_RATE_LIMIT: ${KEYAUTH_SERVER_RATE_LIMIT:-600/60s}
+      KEYAUTH_RATE_LIMIT: ${KEYAUTH_RATE_LIMIT:-30/60s}
+      KEYAUTH_PER_USER: ${KEYAUTH_PER_USER:-1}
+      KEYAUTH_DEBUG_SCORES: "0"
+      # KEYAUTH_HOST, KEYAUTH_PORT, KEYAUTH_CHECKPOINT and KEYAUTH_DB are set by the image
+      # (0.0.0.0:8000, /app/checkpoints/model.pt, /app/state/keyauth.db).
+    ports:
+      # Loopback only by default. Put a TLS reverse proxy in front (docs/SELF_HOSTING.md); do not publish plain HTTP.
+      - "${TEMPO_BIND:-127.0.0.1}:${TEMPO_PORT:-8000}:8000"
+    volumes:
+      - tempo-state:/app/state # SQLite: sites, enrolled templates (biometric data), used tokens
+      - ./checkpoints:/app/checkpoints:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+
+  # One-off job, not started by "up": docker compose --profile train run --rm train
+  # Downloads the CMU benchmark into ./data (needs network) and writes ./checkpoints/model.pt.
+  # Runs as your host user (TEMPO_UID / TEMPO_GID, written to .env by selfhost_init.sh) so the files are yours.
+  train:
+    profiles: ["train"]
+    build: .
+    image: tempo:local
+    user: "${TEMPO_UID:-1000}:${TEMPO_GID:-1000}"
+    environment:
+      HOME: /tmp
+    working_dir: /app
+    volumes:
+      - ./scripts:/app/scripts:ro
+      - ./data:/app/data
+      - ./checkpoints:/app/checkpoints
+    command: ["sh", "-c", "python scripts/get_cmu.py && python -m keyauth.train --data cmu"]
+
+volumes:
+  tempo-state:
