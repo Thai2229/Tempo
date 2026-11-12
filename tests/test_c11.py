@@ -336,3 +336,72 @@ def test_cmu_normalizer_modes(compare):
     assert not np.allclose(compare.cmu_normalizer("cmu", given, data).mean, 0.0)
     with pytest.raises(ValueError):
         compare.cmu_normalizer("other", given, data)
+
+
+# ---- C11b: fine-tuning with the final Enter kept from a model trained without it -----------------
+
+
+def test_cli_keep_enter_from_a_no_enter_checkpoint_works_through_the_embedder(base_model, tmp_path):
+    no_enter = _no_enter_checkpoint(base_model, tmp_path)
+    small = ["--epochs", "1", "--batches-per-epoch", "2", "--p", "4", "--k", "4"]
+    out = tmp_path / "kept.pt"
+    main(["--data", "synthetic", "--init", str(no_enter), "--keep-enter", "--out", str(out), *small])
+    model, normalizer, meta = load_checkpoint(out)
+    assert meta["final_enter"] is True and meta["per_user_threshold"] is not None
+    assert json.loads(out.with_suffix(".json").read_text())["final_enter"] is True
+
+    embedder, threshold = TorchEmbedder.from_checkpoint(out)
+    assert embedder.final_enter is True
+    _, _, _, _, test_data = base_model
+    t = test_data.values[0, : test_data.lengths[0]].copy()
+    expected = embed(model, normalizer, KeystrokeData.from_arrays([t], ["u"]))[0]  # the full attempt, Enter included
+    np.testing.assert_allclose(embedder(t), expected, atol=1e-6)
+    changed = t.copy()
+    changed[-1, 0] += 0.3  # the Enter's hold now matters
+    assert not np.allclose(embedder(changed), expected, atol=1e-4)
+
+    engine = KeyAuthEngine(embedder, TemplateStore(), threshold, EngineConfig(enroll_samples=5))
+    rows = np.flatnonzero(test_data.user_ids == test_data.users[0])
+    samples = [test_data.values[i, : test_data.lengths[i]].copy() for i in rows[:7]]
+    assert [engine.enroll("app", "alice", s) for s in samples[:5]][-1].status == "complete"
+    assert engine.verify("app", "alice", samples[6]).reason != "length_mismatch"
+    assert engine.verify("app", "alice", samples[6][:-1]).reason == "length_mismatch"
+
+
+def test_cli_keep_enter_needs_init_and_is_refused_for_aalto(base_model, tmp_path):
+    with pytest.raises(ValueError):
+        main(["--data", "synthetic", "--keep-enter", "--epochs", "1", "--out", str(tmp_path / "x.pt")])
+    cache = tmp_path / "aalto.npz"
+    free_text().save_npz(cache)
+    no_enter = _no_enter_checkpoint(base_model, tmp_path)
+    with pytest.raises(ValueError):  # Aalto has no Enter to keep
+        main(["--data", "aalto", "--aalto-cache", str(cache), "--init", str(no_enter), "--keep-enter",
+              "--out", str(tmp_path / "y.pt")])
+    assert not (tmp_path / "x.pt").exists() and not (tmp_path / "y.pt").exists()
+
+
+def test_b2_job_keep_enter_writes_a_final_enter_checkpoint(compare, base_model, tmp_path, monkeypatch):
+    no_enter = _no_enter_checkpoint(base_model, tmp_path)
+    data = make_synthetic_dataset(n_users=16, samples_per_user=30, seed=1)
+
+    def fake_cmu(final_enter: bool, keys: bool = False) -> KeystrokeData:
+        if not final_enter:
+            return data.drop_final_key()
+        return data
+
+    monkeypatch.setattr(compare, "C11_DIR", tmp_path / "c11")
+    monkeypatch.setattr(compare, "cmu_data", fake_cmu)
+    monkeypatch.setattr(compare, "aalto_ckpt", lambda variant, seed: no_enter)
+    job = {"variant": "v", "normalizer": "aalto", "lr": 1e-3, "epochs": 1, "split": 0, "replicate": 0}
+    kept = compare.b2_job({**job, "final_enter": True})
+    dropped = compare.b2_job(job)
+    assert kept["final_enter"] is True and dropped["final_enter"] is False
+    kept_path = compare.b2_ckpt("v", 1e-3, 1, 0, 0, True, "aalto")
+    dropped_path = compare.b2_ckpt("v", 1e-3, 1, 0, 0)
+    assert kept_path.parent.name == "b2e" and "normaalto" in kept_path.name and dropped_path.parent.name == "b2"
+    assert load_checkpoint(kept_path)[2]["final_enter"] is True
+    assert load_checkpoint(dropped_path)[2]["final_enter"] is False
+    # the test-scoring path reads final_enter from the checkpoint and feeds the matching input
+    scored = compare.cmu_ckpt_job({"checkpoint": str(kept_path), "variant": "b2e", "split": 0, "replicate": 0})
+    assert scored["val"]["eer"] == pytest.approx(kept["val"]["eer"]) and 0.0 <= scored["test"]["eer"] <= 1.0
+    assert TorchEmbedder.from_checkpoint(kept_path)[0].final_enter is True

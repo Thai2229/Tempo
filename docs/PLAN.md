@@ -76,6 +76,8 @@ portfolio demo unless the authors grant permission.
   - Result: B2 (Aalto pretrain + CMU fine-tune) won val by 0.38 points (18.72 vs 19.10, inside the noise) but tied on
     test (21.48 vs 21.23 on the same runs). Shipped model kept: no real gain, and an Aalto-derived model would carry
     the non-commercial license. Details in docs/RESULTS.md (C11).
+  - C11b follow-up: fine-tuning with CMU's Return kept (B2e) was worse on val (19.84 vs 18.72 / 19.10) and tied on
+    test (20.33 vs 21.23, inside the paired noise); not shipped. Details in docs/RESULTS.md (C11b).
 
 ## C12: Multi-site service (owner: backend-developer)
 - [x] Sites table: site_id (= app_id), public site key, hashed secret, allowed origins; admin CLI to create sites
