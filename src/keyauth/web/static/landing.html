@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Tempo checks the rhythm of how you type your password, as a soft second factor. Try it in your browser.">
+  <title>Tempo: log in by the rhythm of your typing</title>
+  <link rel="stylesheet" href="static/landing.css">
+</head>
+<body>
+  <a class="skip" href="#try">Skip to the demo</a>
+  <header class="top">
+    <div class="wrap bar">
+      <span class="brand">Tempo</span>
+      <nav aria-label="Sections">
+        <a href="#how">How it works</a>
+        <a href="#numbers">Numbers</a>
+        <a href="#embed">Use it on your site</a>
+        <a href="#privacy">Privacy</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-h">
+      <div class="hero-text">
+        <h1 id="hero-h">Log in by the rhythm of your typing</h1>
+        <p class="lead">Tempo learns how you type your password: how long you hold each key and how fast you move to the next. At login it checks that rhythm, as a second factor next to the password.</p>
+        <p class="muted">It is a soft signal, not a lock. The numbers below say how soft.</p>
+      </div>
+
+      <div id="try" class="card widget" role="group" aria-labelledby="try-h">
+        <h2 id="try-h">Try it</h2>
+        <p class="privacy-note"><strong>Your keys never leave the browser.</strong> Only anonymized timings are sent: how long each key was held and the gaps between keys, with every key name replaced by a placeholder.</p>
+
+        <label for="user">Demo name <span class="hint">(a random one is filled in; letters, digits, . _ @ -)</span></label>
+        <input id="user" name="user" type="text" autocomplete="off" spellcheck="false" autocapitalize="none" maxlength="64" aria-describedby="user-error status-line">
+        <p id="user-error" class="error" role="alert" hidden></p>
+        <p id="status-line" class="status" aria-live="polite"></p>
+
+        <div id="progress-wrap" hidden>
+          <label for="progress">Enrollment progress</label>
+          <div class="progress-row">
+            <progress id="progress" value="0" max="10"></progress>
+            <span id="progress-text">0 / 10</span>
+          </div>
+        </div>
+
+        <label for="typing"><span id="type-title">Type the phrase</span></label>
+        <p class="hint" id="type-hint">Demo only, the password is public: type <code id="phrase"></code> and press Enter. Steady pace, no corrections; if you slip, start over.</p>
+        <input id="typing" name="typing" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" disabled aria-describedby="type-hint result">
+
+        <div id="result" class="result" role="status" aria-live="polite" aria-atomic="true"></div>
+
+        <div class="delete">
+          <button id="delete" type="button" class="danger" hidden>Delete my data</button>
+          <p class="hint">Delete my data removes your stored template for this name. On a public server only the operator can do it (it needs an admin token), so nobody can delete someone else's template and enroll as them. If you are refused, ask the operator.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="how" class="wrap block" aria-labelledby="how-h">
+      <h2 id="how-h">How it works</h2>
+      <div class="how">
+        <ol class="steps">
+          <li><strong>Capture.</strong> The browser records when each key goes down and up, in milliseconds.</li>
+          <li><strong>Anonymize.</strong> Before sending, every key becomes a placeholder (<code>x</code>, <code>k0</code>, <code>k1</code>, ...). The server never learns what was typed.</li>
+          <li><strong>Embed.</strong> Each keystroke becomes three timings. A small PyTorch encoder turns the attempt into a point on a sphere. Typing it 10 times gives your template, the mean point.</li>
+          <li><strong>Compare.</strong> At login, accept if the new attempt is close enough to the template. Replays are rejected, repeated failures lock the account, and the template adapts slowly as your rhythm drifts.</li>
+        </ol>
+        <figure class="diagram">
+          <svg viewBox="0 0 380 198" role="img" aria-labelledby="dg-t dg-d">
+            <title id="dg-t">Timings measured for two consecutive keys</title>
+            <desc id="dg-d">Key 1 is held from its down event to its up event: that is hold. The gap from key 1 up to key 2 down is ud. The span from key 1 down to key 2 down is dd.</desc>
+            <g class="guide">
+              <line x1="40" y1="24" x2="40" y2="140"/>
+              <line x1="150" y1="24" x2="150" y2="140"/>
+              <line x1="210" y1="58" x2="210" y2="140"/>
+              <line x1="340" y1="58" x2="340" y2="90"/>
+            </g>
+            <rect class="key" x="40" y="24" width="110" height="24" rx="4"/>
+            <rect class="key" x="210" y="58" width="130" height="24" rx="4"/>
+            <text class="on-bar" x="48" y="41">key 1</text>
+            <text class="on-bar" x="218" y="75">key 2</text>
+            <g class="dim">
+              <path d="M40 104H150M40 99V109M150 99V109"/>
+              <path d="M150 104H210M210 99V109"/>
+              <path d="M40 140H210M40 135V145M210 135V145"/>
+            </g>
+            <text class="lbl" x="95" y="97" text-anchor="middle">hold</text>
+            <text class="lbl" x="180" y="97" text-anchor="middle">ud</text>
+            <text class="lbl" x="125" y="133" text-anchor="middle">dd</text>
+            <text class="axis" x="372" y="194" text-anchor="end">time</text>
+            <path class="axis-line" d="M40 172H372M366 168L372 172L366 176"/>
+          </svg>
+          <figcaption><strong>hold</strong>: key down to key up. <strong>ud</strong>: key up to next key down. <strong>dd</strong>: key down to next key down. These numbers, in seconds, are all the model sees.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="numbers" class="wrap block" aria-labelledby="numbers-h">
+      <h2 id="numbers-h">Honest numbers</h2>
+      <p>Measured on the CMU Keystroke Dynamics Benchmark: 51 typists, one password, 10 enrollment attempts, test users never seen in training, threshold chosen on validation users only. Equal error rate (EER, lower is better), mean &plusmn; std over 5 user splits.</p>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="Results table">
+        <table>
+          <caption class="visually-hidden">Equal error rate on the CMU benchmark</caption>
+          <thead><tr><th scope="col">Method</th><th scope="col">Val EER</th><th scope="col">Test EER</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Scaled Manhattan (classic baseline)</th><td>23.72 &plusmn; 1.57 %</td><td>22.14 &plusmn; 5.98 %</td></tr>
+            <tr><th scope="row">Mahalanobis (classic baseline)</th><td>22.45 &plusmn; 2.62 %</td><td>23.27 &plusmn; 4.89 %</td></tr>
+            <tr class="us"><th scope="row">Tempo encoder</th><td>18.76 &plusmn; 4.47 %</td><td><strong>21.50 &plusmn; 9.30 %</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul>
+        <li><strong>It is a tie, not a win.</strong> Tempo matches classic detectors from 2009. With 8 test users per split, any single number is about &plusmn; 5 points.</li>
+        <li><strong>10 enrollment attempts is few.</strong> The classic study used 200.</li>
+        <li><strong>A soft signal, not a lock.</strong> At roughly 1 error in 5, it cannot authenticate anyone on its own. Use it next to a password, to add friction for an attacker or to raise a flag.</li>
+      </ul>
+      <p class="muted">Per-seed tables and failure cases: docs/RESULTS.md in the repository.</p>
+    </section>
+
+    <section id="embed" class="wrap block" aria-labelledby="embed-h">
+      <h2 id="embed-h">Use it on your site</h2>
+      <p>Add the script and attach it to your password field. The browser gets back only a signed, single-use token valid for 60 seconds. Your server then asks Tempo whether the rhythm matched.</p>
+<pre tabindex="0"><code>&lt;script src="https://YOUR-TEMPO-HOST/v1/keyauth.js" defer&gt;&lt;/script&gt;
+keyauth.attach(document.getElementById("pw"), {sitekey: "pk...", userIdField: "#username"});
+POST /v1/siteverify {secret, token}  -&gt;  {success, user_id, rhythm_match, risk}</code></pre>
+      <p>Always call <code>siteverify</code> from your server and compare the returned <code>user_id</code> with the account that logged in. Setup, enrollment tickets and the threat model are in <code>docs/SERVICE.md</code>.</p>
+    </section>
+
+    <section id="privacy" class="wrap block" aria-labelledby="privacy-h">
+      <h2 id="privacy-h">Privacy</h2>
+      <p>Keystroke timings are biometric data. The page sends anonymized events only: no key names and no password, just times and placeholders. Logs carry a hash of the user id and the outcome, never timings or scores. The repository contains no user templates, databases or model files.</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap">
+      <p>Tempo is MIT licensed. The shipped model is trained on the CMU Keystroke Dynamics Benchmark, &copy; Killourhy &amp; Maxion, Carnegie Mellon University, which is downloaded from their site and not redistributed here.</p>
+      <p><a href="demo">Plain demo page</a></p>
+    </div>
+  </footer>
+  <script type="module" src="static/landing.js"></script>
+</body>
+</html>
