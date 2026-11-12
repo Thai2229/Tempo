@@ -7,6 +7,8 @@ Browser endpoints (CORS limited to the site's allowed origins; they never say "a
 Server endpoints (secret in the body; no CORS; requests carrying an Origin header are refused):
   POST /v1/tickets     {secret, user_id, reset?}  -> {ticket, expires_in}
   POST /v1/siteverify  {secret, token}            -> {success, user_id, rhythm_match, risk} | {success: false, error}
+Public static script (the only response with Access-Control-Allow-Origin: *; it carries no data):
+  GET  /v1/keyauth.js  the embeddable capture script customers load with <script src defer>
 
 Errors keep the shape {"error": {"code", "message"}}. 403 forbidden: unknown/disabled site key, missing or
 disallowed Origin (all the same answer). 403 invalid_ticket. 401 unauthorized: bad secret. /v1/verify answers 200
@@ -22,6 +24,7 @@ import hashlib
 import logging
 import secrets
 import time
+from pathlib import Path
 from typing import Annotated, Callable
 
 from fastapi import APIRouter, FastAPI, Request
@@ -37,6 +40,7 @@ from keyauth.sites import authenticate_secret, secret_site_id
 
 logger = logging.getLogger("keyauth.api")
 
+KEYAUTH_JS = Path(__file__).resolve().parent.parent / "web" / "static" / "keyauth.js"
 MIN_TOKEN_KEY_CHARS = 32
 TICKET_TTL_S = 600.0
 V1_USER_ID_PATTERN = r"^[A-Za-z0-9._-]{1,64}$"  # opaque ids; no '@' on purpose (do not use emails)
@@ -199,6 +203,20 @@ def install(
         issued = now()
         claims = TokenClaims(site.site_id, body.user_id, match, risk, issued, issued + TOKEN_TTL_S, new_jti())
         return {"token": sign_token(key, claims)}
+
+    # ---- embeddable script (public, static) ------------------------------------
+
+    @router.get("/keyauth.js", include_in_schema=False)
+    def keyauth_js():
+        if not KEYAUTH_JS.is_file():
+            raise ApiError(404, "not_found", "Not Found")
+        headers = {
+            "Cache-Control": "public, max-age=300",
+            "Access-Control-Allow-Origin": "*",  # only for this public, static file
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            "X-Content-Type-Options": "nosniff",
+        }
+        return Response(KEYAUTH_JS.read_bytes(), media_type="application/javascript", headers=headers)
 
     # ---- server side --------------------------------------------------------
 

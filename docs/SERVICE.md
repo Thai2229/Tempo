@@ -57,6 +57,55 @@ Decisions:
 - User ids: `[A-Za-z0-9._-]{1,64}`. Opaque ids chosen by the customer; do not use emails (`@` is rejected).
   Logs carry only a short hash of the id, the site id and the outcome; never secrets, tickets, tokens or timings.
 
+## Embedding
+Served by the service itself (only when `KEYAUTH_ENABLE_V1=1`): `GET /v1/keyauth.js`, `Content-Type: application/javascript`,
+`Cache-Control: public, max-age=300`, `nosniff`, and `Access-Control-Allow-Origin: *` (this one public static file only).
+```html
+<form method="post" action="/login">
+  <input id="username" name="username" autocomplete="username">
+  <input id="pw" name="password" type="password" autocomplete="current-password">
+  <button>Log in</button>
+</form>
+<script src="https://KEYAUTH-HOST/v1/keyauth.js" defer></script>
+<script src="/login-page.js" defer></script>  <!-- same-origin file; no inline script needed -->
+```
+```js
+// login-page.js
+const k = keyauth.attach(document.getElementById("pw"), {sitekey: "pk...", userIdField: "#username"});
+// the form now posts an extra hidden field "keyauth_token"; k.destroy() / k.reset() / await k.getToken() also exist
+```
+Enrollment (the page repeats it `required` times; the ticket comes from your server via `/v1/tickets`):
+```js
+const {samples, required, done} = await keyauth.enroll(pwInput, {sitekey, ticket, user_id});   // one typed attempt per call
+```
+API:
+- `keyauth.attach(input, {sitekey, endpoint?, tokenField? = "keyauth_token", userIdField?, mode? = "verify"})` returns `{destroy(), reset(), getToken()}`.
+  `endpoint` defaults to the origin the script was loaded from. `userIdField` is a selector, an element or a function
+  returning the opaque id (`[A-Za-z0-9._-]{1,64}`, no emails). `getToken()` resolves to the token string, or `""`; it never rejects.
+  Attaching twice to one input replaces the first instance.
+- `keyauth.enroll(input, {sitekey, ticket, user_id, endpoint?})` resolves `{samples, required, done}` (plus `reason` when the
+  server restarted enrollment, e.g. `"inconsistent"`) and rejects with an `Error` whose `.code` is the server's error code
+  (`invalid_ticket`, `replay`, `length_mismatch`, `rate_limited`, ...) or `network` / `timeout` / `cancelled` / `bad_arguments`.
+  Corrections and pastes are ignored: it waits for one clean attempt. Clear the field between samples.
+
+Behaviour and decisions:
+- The user must finish with Enter in the password field: Enter is part of the captured rhythm (as in enrollment), so the script
+  holds back the Enter keydown, and submits the form after the Enter keyup (`form.requestSubmit()`). A click on the submit
+  button without Enter, a paste, an autofill, Backspace/Delete, a blur, or a password shorter than 4 or longer than 100
+  characters produces no attempt: the form is submitted unchanged with an EMPTY token field.
+- It never reads `input.value`, and never sends or stores the password or key names. Events are anonymized in the browser before
+  sending (every key but modifiers and Enter becomes `"x"`, codes become `k0`, `k1`, ...). Same code as the demo page: the logic of
+  `capture.js` is copied into `keyauth.js` between markers by `scripts/sync_keyauth.py`; `pytest` fails if they drift
+  (edit `capture.js`, run `python scripts/sync_keyauth.py`). No `eval`, inline handlers, storage or cookies; the only request is
+  `POST {endpoint}/v1/verify` (and `/v1/enroll`), sent without credentials. Because the Origin must be allowed for the site
+  key (see CORS above), the customer page's CSP needs `script-src` and `connect-src` to include the keyauth host.
+- Fail open or closed is the CUSTOMER's choice. If keyauth is unreachable, errors, or does not answer within 5 s, the form is still
+  submitted with an empty token, so keyauth can never lock a user out of your login. Your server decides what an empty token means:
+  treating it like `rhythm_match=false` (for example asking for a second factor) is fail-closed; accepting the password alone is fail-open.
+  Always do the `siteverify` call on your server, compare the returned `user_id` with the account that logged in, and
+  remember the token is single use and lives 60 s.
+- `mode` is accepted for future use; only `"verify"` exists.
+
 ## Token format
 `base64url(payload) "." base64url(HMAC-SHA256(KEYAUTH_TOKEN_KEY, "keyauth-token-v1." + base64url(payload)))`
 with payload `{v:1, sid, uid, m (bool), r, iat, exp, jti}`, `exp - iat = 60 s`. There is no algorithm field, so there

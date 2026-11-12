@@ -7,6 +7,10 @@ export const SUBMIT_KEY = "Enter";
 export const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock", "AltGraph"]);
 // Keys that mean "the user is correcting a typo": rhythm is not comparable, start over.
 export const RESET_KEYS = new Set(["Backspace", "Delete"]);
+// Length rules for a phrase we do not know (embedded login: the field holds the user's own password).
+// Counted in non-modifier keydowns, without the trailing Enter; MAX stays under the API's 128 keys.
+export const MIN_PHRASE_KEYS = 4;
+export const MAX_PHRASE_KEYS = 100;
 export const USER_ID_PATTERN = /^[A-Za-z0-9._@-]{1,64}$/;
 
 export function isValidUserId(value) {
@@ -15,8 +19,13 @@ export function isValidUserId(value) {
 
 // Text spelled by the non-modifier keydowns, without the trailing Enter.
 // Events are the raw ones (real key names), before anonymize().
+// With phrase === null the text is not compared: only "ends with Enter, and the length is within the rules".
 export function matchesPhrase(events, phrase = PHRASE) {
   const keys = events.filter((e) => e.type === "down" && !MODIFIER_KEYS.has(e.key)).map((e) => e.key);
+  if (phrase === null) {
+    const typed = keys.length - 1;
+    return keys[keys.length - 1] === SUBMIT_KEY && !keys.slice(0, -1).includes(SUBMIT_KEY) && typed >= MIN_PHRASE_KEYS && typed <= MAX_PHRASE_KEYS;
+  }
   const expected = Array.from(phrase);
   expected.push(SUBMIT_KEY);
   if (keys.length !== expected.length) {
@@ -80,7 +89,7 @@ export function anonymize(events) {
 
 // Collects raw events for one attempt. Feed it keydown/keyup (with performance.now() times).
 // Every method returns a result object: {status: "ok"} | {status: "reset", reason} |
-// {status: "done", events}.  reason: "correction" | "incomplete" | "wrong_password".
+// {status: "done", events}.  (phrase === null: any password of allowed length, see matchesPhrase.)  reason: "correction" | "incomplete" | "wrong_password".
 // "done" events are already anonymized and safe to send.
 export class Recorder {
   constructor(phrase = PHRASE) {
